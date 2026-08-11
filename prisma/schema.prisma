@@ -1,0 +1,149 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum EmployeeRole {
+  DOCTOR
+  NURSE
+}
+
+enum AvailabilityKind {
+  DAY_OFF
+  UNAVAILABLE
+}
+
+enum ScheduleStatus {
+  DRAFT
+  SELECTED
+  ARCHIVED
+}
+
+model Clinic {
+  id                String        @id @default(cuid())
+  name              String
+  defaultLocale     String        @default("zh-TW")
+  minDoctors        Int           @default(1)
+  maxDoctors        Int           @default(2)
+  minNurses         Int           @default(1)
+  flexibleHoursMode Boolean       @default(false)
+  approvalAttested  Boolean       @default(false)
+  employees         Employee[]
+  scheduleRuns      ScheduleRun[]
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+}
+
+model Employee {
+  id                 String             @id @default(cuid())
+  clinicId           String
+  clinic             Clinic             @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  name               String
+  role               EmployeeRole
+  backupOnly         Boolean            @default(false)
+  targetWeeklyHours  Float              @default(40)
+  minMonthlyHours    Float?
+  maxMonthlyHours    Float?
+  yearsExperience    Int?
+  expertise          String?
+  hobbies            String?
+  abilityScores      Json?
+  active             Boolean            @default(true)
+  sortOrder           Int                @default(0)
+  availability       Availability[]
+  preferencesFrom    CoworkerPreference[] @relation("PreferenceFrom")
+  preferencesTo      CoworkerPreference[] @relation("PreferenceTo")
+  assignments        Assignment[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@index([clinicId, active])
+}
+
+model CoworkerPreference {
+  id          String   @id @default(cuid())
+  fromId      String
+  toId        String
+  from        Employee @relation("PreferenceFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  to          Employee @relation("PreferenceTo", fields: [toId], references: [id], onDelete: Cascade)
+  weight      Int      @default(1)
+  note        String?
+  createdAt   DateTime @default(now())
+
+  @@unique([fromId, toId])
+}
+
+model Availability {
+  id          String           @id @default(cuid())
+  employeeId  String
+  employee    Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date        DateTime         @db.Date
+  kind        AvailabilityKind
+  note        String?
+
+  @@unique([employeeId, date, kind])
+  @@index([date])
+}
+
+model ScheduleRun {
+  id             String         @id @default(cuid())
+  clinicId       String
+  clinic         Clinic         @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  month          DateTime       @db.Date
+  status         ScheduleStatus @default(DRAFT)
+  seed           Int
+  inputSnapshot  Json
+  selectedId     String?        @unique
+  candidates     Candidate[]
+  selected       Candidate?     @relation("SelectedCandidate", fields: [selectedId], references: [id])
+  summaries      AiSummary[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([clinicId, month])
+}
+
+model Candidate {
+  id           String        @id @default(cuid())
+  scheduleRunId String
+  scheduleRun  ScheduleRun   @relation(fields: [scheduleRunId], references: [id], onDelete: Cascade)
+  selectedFor  ScheduleRun?  @relation("SelectedCandidate")
+  rank         Int
+  score        Float
+  scoreDetails Json
+  warnings     Json
+  assignments  Assignment[]
+  createdAt    DateTime      @default(now())
+
+  @@unique([scheduleRunId, rank])
+}
+
+model Assignment {
+  id          String    @id @default(cuid())
+  candidateId String
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  employeeId  String
+  employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  date        DateTime  @db.Date
+  session     String
+  hours       Float
+  manual      Boolean   @default(false)
+
+  @@unique([candidateId, employeeId, date, session])
+  @@index([candidateId, date])
+}
+
+model AiSummary {
+  id            String      @id @default(cuid())
+  scheduleRunId String
+  scheduleRun   ScheduleRun @relation(fields: [scheduleRunId], references: [id], onDelete: Cascade)
+  locale        String
+  content       String
+  model         String
+  edited        Boolean     @default(false)
+  createdAt     DateTime    @default(now())
+}

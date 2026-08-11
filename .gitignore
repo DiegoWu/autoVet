@@ -1,0 +1,14 @@
+.env
+.env.local
+.env.*.local
+.env.docker
+!.env.example
+!.env.docker.example
+node_modules/
+.next/
+out/
+coverage/
+test-results/
+playwright-report/
+*.log
+prisma/dev.db*

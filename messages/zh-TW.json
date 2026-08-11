@@ -1,0 +1,101 @@
+{
+  "meta": {
+    "title": "autoVet｜獸醫診所智慧排班",
+    "description": "清楚、合規、可解釋的獸醫診所排班工具"
+  },
+  "nav": {
+    "workspace": "排班工作台",
+    "staff": "員工",
+    "history": "歷史班表",
+    "settings": "設定",
+    "language": "English"
+  },
+  "hero": {
+    "eyebrow": "本月排班",
+    "title": "讓每個班次，都安排得剛剛好。",
+    "subtitle": "依照人力、休假與偏好，快速產生合規且可解釋的班表。",
+    "legal": "排班結果僅供規劃參考，請由管理者確認勞動法規與個別契約。"
+  },
+  "steps": {
+    "staff": "員工資料",
+    "rules": "排班條件",
+    "generate": "產生與比較",
+    "confirm": "確認與匯出"
+  },
+  "staff": {
+    "title": "誰會加入這個月的班表？",
+    "hint": "新增醫師與護理師，設定每週目標工時。",
+    "name": "姓名",
+    "role": "職務",
+    "doctor": "醫師",
+    "backupDoctor": "支援醫師",
+    "nurse": "護理師",
+    "hours": "每週目標",
+    "experience": "年資",
+    "expertise": "專長",
+    "hobbies": "興趣",
+    "add": "新增員工",
+    "empty": "先新增至少一位醫師和一位護理師。"
+  },
+  "rules": {
+    "title": "設定診所需要的人力",
+    "month": "排班月份",
+    "minDoctors": "每診最少醫師",
+    "maxDoctors": "每診最多醫師",
+    "minNurses": "每診最少護理師",
+    "closedSundays": "週日休診",
+    "flex": "四週彈性工時",
+    "flexHelp": "僅在工會或勞資會議依法同意後啟用。",
+    "attest": "我確認診所已取得所需同意",
+    "daysOff": "指定休假",
+    "preferences": "合作偏好"
+  },
+  "generate": {
+    "title": "比較可行班表",
+    "action": "產生 3 組班表",
+    "working": "正在計算最合適的組合…",
+    "candidate": "方案 {rank}",
+    "score": "適配分數",
+    "select": "選擇此方案",
+    "selected": "已選擇",
+    "coverage": "人力覆蓋",
+    "fairness": "工時公平",
+    "preference": "偏好符合",
+    "warning": "注意事項",
+    "noResult": "目前條件無法產生完整班表。請增加人力或調整休假。"
+  },
+  "schedule": {
+    "morning": "早診",
+    "afternoon": "午診",
+    "evening": "晚診",
+    "closed": "休診",
+    "doctor": "醫師",
+    "nurse": "護理師"
+  },
+  "export": {
+    "title": "班表已準備好",
+    "summary": "AI 偏好摘要",
+    "summaryHint": "AI 只會摘要結果，不會更改排班。",
+    "pdf": "下載 PDF",
+    "png": "下載 PNG",
+    "jpg": "下載 JPG",
+    "save": "儲存班表",
+    "new": "建立新班表"
+  },
+  "history": {
+    "title": "過去班表",
+    "subtitle": "依月份、員工或狀態快速查找。",
+    "search": "搜尋月份或員工",
+    "empty": "還沒有已儲存的班表。"
+  },
+  "common": {
+    "back": "上一步",
+    "next": "下一步",
+    "remove": "移除",
+    "edit": "編輯",
+    "save": "儲存",
+    "cancel": "取消",
+    "hours": "小時",
+    "required": "必填"
+  }
+}

@@ -1,0 +1,101 @@
+{
+  "meta": {
+    "title": "autoVet | Veterinary clinic scheduling",
+    "description": "Clear, compliant, explainable scheduling for veterinary clinics"
+  },
+  "nav": {
+    "workspace": "Schedule",
+    "staff": "Staff",
+    "history": "History",
+    "settings": "Settings",
+    "language": "繁體中文"
+  },
+  "hero": {
+    "eyebrow": "Monthly roster",
+    "title": "Every shift, thoughtfully covered.",
+    "subtitle": "Turn staffing, leave and preferences into compliant, explainable schedules.",
+    "legal": "Schedules are planning assistance. An administrator must confirm labor-law and contract compliance."
+  },
+  "steps": {
+    "staff": "Staff",
+    "rules": "Constraints",
+    "generate": "Compare",
+    "confirm": "Confirm & export"
+  },
+  "staff": {
+    "title": "Who is working this month?",
+    "hint": "Add doctors and nurses, then set weekly target hours.",
+    "name": "Name",
+    "role": "Role",
+    "doctor": "Doctor",
+    "backupDoctor": "Backup doctor",
+    "nurse": "Nurse",
+    "hours": "Weekly target",
+    "experience": "Experience",
+    "expertise": "Expertise",
+    "hobbies": "Hobbies",
+    "add": "Add staff",
+    "empty": "Add at least one doctor and one nurse."
+  },
+  "rules": {
+    "title": "Set clinic coverage",
+    "month": "Schedule month",
+    "minDoctors": "Doctors per session",
+    "maxDoctors": "Maximum doctors per session",
+    "minNurses": "Nurses per session",
+    "closedSundays": "Closed Sundays",
+    "flex": "Four-week flexible hours",
+    "flexHelp": "Enable only after legally required union or labor-management approval.",
+    "attest": "I confirm the clinic has the required approval",
+    "daysOff": "Specific days off",
+    "preferences": "Coworker preferences"
+  },
+  "generate": {
+    "title": "Compare feasible schedules",
+    "action": "Generate 3 schedules",
+    "working": "Finding the best combinations…",
+    "candidate": "Option {rank}",
+    "score": "Fit score",
+    "select": "Choose this option",
+    "selected": "Selected",
+    "coverage": "Coverage",
+    "fairness": "Hour fairness",
+    "preference": "Preferences",
+    "warning": "Attention",
+    "noResult": "These constraints cannot produce a complete schedule. Add staff or adjust leave."
+  },
+  "schedule": {
+    "morning": "Morning",
+    "afternoon": "Afternoon",
+    "evening": "Evening",
+    "closed": "Closed",
+    "doctor": "Doctor",
+    "nurse": "Nurse"
+  },
+  "export": {
+    "title": "Your schedule is ready",
+    "summary": "AI preference summary",
+    "summaryHint": "AI summarizes the result and never changes assignments.",
+    "pdf": "Download PDF",
+    "png": "Download PNG",
+    "jpg": "Download JPG",
+    "save": "Save schedule",
+    "new": "Create another"
+  },
+  "history": {
+    "title": "Schedule history",
+    "subtitle": "Find past schedules by month, employee, or status.",
+    "search": "Search month or employee",
+    "empty": "No saved schedules yet."
+  },
+  "common": {
+    "back": "Back",
+    "next": "Continue",
+    "remove": "Remove",
+    "edit": "Edit",
+    "save": "Save",
+    "cancel": "Cancel",
+    "hours": "hours",
+    "required": "Required"
+  }
+}
