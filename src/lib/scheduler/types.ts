@@ -11,9 +11,11 @@ export type LocalDate = string;
 export interface EmployeePreferences {
   preferredCoworkerIds?: string[];
   avoidedCoworkerIds?: string[];
+  discouragedCoworkerIds?: string[];
   preferredSessions?: SessionId[];
   avoidedSessions?: SessionId[];
   preferredDates?: LocalDate[];
+  avoidedDates?: LocalDate[];
 }
 
 export interface Employee {
@@ -21,6 +23,9 @@ export interface Employee {
   name: string;
   role: EmployeeRole;
   targetHoursPerWeek: number;
+  /** Target for distinct workdays in a scheduling week. */
+  preferredDaysPerWeek?: number;
+  preferredDaysConstraint?: "absolute" | "preferred";
   maxHoursPerWeek?: number;
   active?: boolean;
   /** Backup doctors cover otherwise-unfillable required slots only. */
@@ -84,6 +89,7 @@ export interface SchedulerConfig {
   candidateCount?: number;
   coverage: Coverage | CoverageRequirement[];
   maxDoctorsPerShift?: number;
+  maxDoctorsPerShiftByDate?: Partial<Record<LocalDate, number>>;
   laborRules?: LaborRuleConfig;
   scoreWeights?: Partial<ScoreWeights>;
 }

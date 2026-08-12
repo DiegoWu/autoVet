@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   SESSIONS,
   generateScheduleCandidates,
+  prorateWeeklyTargetHours,
   scoreSchedule,
   validateLaborRules,
   validateSchedule,
+  validateSchedulerInput,
   type Assignment,
   type Employee,
   type SchedulerConfig,
@@ -79,6 +81,32 @@ describe("deterministic candidate generation", () => {
         config,
       ).filter((issue) => issue.severity === "error"),
     ).toEqual([]);
+    expect(candidate.assignments.some((assignment) => assignment.role === "doctor")).toBe(true);
+    expect(candidate.assignments.some((assignment) => assignment.role === "nurse")).toBe(true);
+  });
+
+  it("generates a doctor-only schedule when nurse coverage is zero", () => {
+    const doctorOnlyConfig: SchedulerConfig = {
+      ...config,
+      coverage: { doctors: 1, nurses: 0 },
+    };
+    const result = generateScheduleCandidates(employees, [], doctorOnlyConfig);
+
+    expect(result.impossible).toBeUndefined();
+    expect(result.candidates[0]!.assignments.length).toBeGreaterThan(0);
+    expect(
+      result.candidates[0]!.assignments.every(
+        (assignment) => assignment.role === "doctor",
+      ),
+    ).toBe(true);
+    expect(
+      validateSchedule(
+        result.candidates[0]!.assignments,
+        employees,
+        [],
+        doctorOnlyConfig,
+      ).filter((issue) => issue.severity === "error"),
+    ).toEqual([]);
   });
 
   it("uses every employee toward their weekly target after minimum coverage", () => {
@@ -102,7 +130,9 @@ describe("deterministic candidate generation", () => {
       const assignedHours = candidate.assignments
         .filter((assignment) => assignment.employeeId === doctor.id)
         .reduce((total, assignment) => total + assignment.hours, 0);
-      expect(assignedHours).toBeGreaterThanOrEqual(doctor.targetHoursPerWeek);
+      expect(assignedHours).toBeGreaterThanOrEqual(
+        prorateWeeklyTargetHours(doctor.targetHoursPerWeek, 2),
+      );
     }
     expect(
       validateSchedule(candidate.assignments, doctors, [], targetConfig).filter(
@@ -112,6 +142,12 @@ describe("deterministic candidate generation", () => {
     expect(
       candidate.warnings.some((issue) => issue.code === "TARGET_HOURS_UNMET"),
     ).toBe(false);
+  });
+
+  it("prorates a partial week's target using a five-day workweek", () => {
+    expect(prorateWeeklyTargetHours(32, 2)).toBeCloseTo(12.8);
+    expect(prorateWeeklyTargetHours(32, 5)).toBe(32);
+    expect(prorateWeeklyTargetHours(32, 7)).toBe(32);
   });
 
   it("uses backup doctors only when regular doctors cannot cover a required shift", () => {
@@ -184,6 +220,115 @@ describe("deterministic candidate generation", () => {
       }
     }
   });
+
+  it("uses a one-doctor cap only on configured dates", () => {
+    const doctors: Employee[] = ["d1", "d2", "d3"].map((id) => ({
+      id,
+      name: id,
+      role: "doctor",
+      targetHoursPerWeek: 16,
+    }));
+    const dateCapConfig: SchedulerConfig = {
+      startDate: "2026-08-10",
+      endDate: "2026-08-11",
+      seed: "date-doctor-cap",
+      coverage: {doctors: 1, nurses: 0},
+      maxDoctorsPerShift: 2,
+      maxDoctorsPerShiftByDate: {"2026-08-10": 1},
+    };
+    const candidate = generateScheduleCandidates(doctors, [], dateCapConfig).candidates[0]!;
+
+    for (const session of ["morning", "afternoon", "evening"] as const) {
+      expect(
+        candidate.assignments.filter(
+          (assignment) =>
+            assignment.role === "doctor" &&
+            assignment.date === "2026-08-10" &&
+            assignment.session === session,
+        ).length,
+      ).toBeLessThanOrEqual(1);
+      expect(
+        candidate.assignments.filter(
+          (assignment) =>
+            assignment.role === "doctor" &&
+            assignment.date === "2026-08-11" &&
+            assignment.session === session,
+        ).length,
+      ).toBeLessThanOrEqual(2);
+    }
+  });
+
+  it("rejects minimum coverage above a date-specific doctor cap", () => {
+    const issues = validateSchedulerInput(employees, [], {
+      startDate: "2026-08-10",
+      endDate: "2026-08-11",
+      seed: "date-cap-conflict",
+      coverage: {doctors: 2, nurses: 1},
+      maxDoctorsPerShift: 2,
+      maxDoctorsPerShiftByDate: {"2026-08-10": 1},
+    });
+
+    expect(
+      issues.some(
+        (issue) => issue.code === "DOCTOR_MINIMUM_EXCEEDS_DATE_MAXIMUM",
+      ),
+    ).toBe(true);
+  });
+
+  it("applies higher minimum coverage to multiple configured popular shifts", () => {
+    const popularConfig: SchedulerConfig = {
+      startDate: "2026-08-10",
+      endDate: "2026-08-11",
+      seed: "popular-date",
+      coverage: [
+        {doctors: 1, nurses: 1},
+        {date: "2026-08-10", session: "afternoon", doctors: 2, nurses: 2},
+        {date: "2026-08-10", session: "evening", doctors: 2, nurses: 2},
+      ],
+      maxDoctorsPerShift: 2,
+    };
+    const candidate = generateScheduleCandidates(employees, [], popularConfig).candidates[0]!;
+
+    for (const session of ["afternoon", "evening"] as const) {
+      expect(
+        candidate.assignments.filter(
+          (assignment) =>
+            assignment.date === "2026-08-10" &&
+            assignment.session === session &&
+            assignment.role === "doctor",
+        ).length,
+      ).toBeGreaterThanOrEqual(2);
+      expect(
+        candidate.assignments.filter(
+          (assignment) =>
+            assignment.date === "2026-08-10" &&
+            assignment.session === session &&
+            assignment.role === "nurse",
+        ).length,
+      ).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it("rejects a popular-date minimum above its one-doctor cap", () => {
+    const issues = validateSchedulerInput(employees, [], {
+      startDate: "2026-08-10",
+      endDate: "2026-08-11",
+      seed: "popular-date-conflict",
+      coverage: [
+        {doctors: 1, nurses: 1},
+        {date: "2026-08-10", doctors: 2, nurses: 1},
+      ],
+      maxDoctorsPerShift: 2,
+      maxDoctorsPerShiftByDate: {"2026-08-10": 1},
+    });
+
+    expect(
+      issues.some((issue) =>
+        issue.code === "DOCTOR_MINIMUM_EXCEEDS_MAXIMUM" ||
+        issue.code === "DOCTOR_MINIMUM_EXCEEDS_DATE_MAXIMUM"
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("weekly pattern scoring", () => {
@@ -200,6 +345,28 @@ describe("weekly pattern scoring", () => {
 
     expect(scoreSchedule(repeated, [employee]).weeklyConsistency).toBeGreaterThan(
       scoreSchedule(changed, [employee]).weeklyConsistency,
+    );
+  });
+
+  it("rewards schedules closer to preferred workdays per week", () => {
+    const employee: Employee = {
+      id: "d1",
+      name: "Dr A",
+      role: "doctor",
+      targetHoursPerWeek: 6.5,
+      preferredDaysPerWeek: 2,
+    };
+    const compact: Assignment[] = [
+      {employeeId: "d1", date: "2026-08-10", session: "morning", role: "doctor", hours: 2.5},
+      {employeeId: "d1", date: "2026-08-10", session: "afternoon", role: "doctor", hours: 4},
+    ];
+    const spread: Assignment[] = [
+      compact[0]!,
+      {employeeId: "d1", date: "2026-08-11", session: "afternoon", role: "doctor", hours: 4},
+    ];
+
+    expect(scoreSchedule(spread, [employee]).targetHourCloseness).toBeGreaterThan(
+      scoreSchedule(compact, [employee]).targetHourCloseness,
     );
   });
 });
@@ -227,6 +394,109 @@ describe("hard constraints and labor boundaries", () => {
         },
       ).some((issue) => issue.code === "DUPLICATE_SHIFT_ASSIGNMENT"),
     ).toBe(true);
+  });
+
+  it("rejects doctors who refuse to share a shift", () => {
+    const doctorA: Employee = {
+      id: "d1",
+      name: "Dr A",
+      role: "doctor",
+      targetHoursPerWeek: 8,
+      preferences: {avoidedCoworkerIds: ["d2"]},
+    };
+    const doctorB: Employee = {
+      id: "d2",
+      name: "Dr B",
+      role: "doctor",
+      targetHoursPerWeek: 8,
+    };
+    const sharedShift: Assignment[] = [doctorA, doctorB].map((doctor) => ({
+      employeeId: doctor.id,
+      date: "2026-08-10",
+      session: "morning",
+      role: "doctor",
+      hours: 2.5,
+    }));
+
+    expect(
+      validateSchedule(sharedShift, [doctorA, doctorB], [], {
+        startDate: "2026-08-10",
+        endDate: "2026-08-10",
+        seed: "avoided-pair",
+        coverage: {doctors: 2, nurses: 0},
+      }).some((issue) => issue.code === "AVOIDED_COWORKER_PAIR"),
+    ).toBe(true);
+  });
+
+  it("treats discouraged coworker pairs as soft preferences", () => {
+    const doctorA: Employee = {
+      id: "d1",
+      name: "Dr A",
+      role: "doctor",
+      targetHoursPerWeek: 2.5,
+      preferences: {discouragedCoworkerIds: ["d2"]},
+    };
+    const doctorB: Employee = {
+      id: "d2",
+      name: "Dr B",
+      role: "doctor",
+      targetHoursPerWeek: 2.5,
+    };
+    const sharedShift: Assignment[] = [doctorA, doctorB].map((doctor) => ({
+      employeeId: doctor.id,
+      date: "2026-08-10",
+      session: "morning",
+      role: "doctor",
+      hours: 2.5,
+    }));
+    const validation = validateSchedule(sharedShift, [doctorA, doctorB], [], {
+      startDate: "2026-08-10",
+      endDate: "2026-08-10",
+      seed: "discouraged-pair",
+      coverage: {doctors: 2, nurses: 0},
+    });
+
+    expect(validation.some((issue) => issue.code === "AVOIDED_COWORKER_PAIR")).toBe(false);
+    expect(scoreSchedule(sharedShift, [doctorA, doctorB]).coworkerPreference).toBeLessThan(0);
+  });
+
+  it("enforces exact workdays only when configured as absolute", () => {
+    const absolute: Employee = {
+      id: "d1",
+      name: "Dr A",
+      role: "doctor",
+      targetHoursPerWeek: 8,
+      preferredDaysPerWeek: 2,
+      preferredDaysConstraint: "absolute",
+    };
+    const preferred: Employee = {
+      ...absolute,
+      preferredDaysConstraint: "preferred",
+    };
+    const oneDay: Assignment[] = [{
+      employeeId: "d1",
+      date: "2026-08-10",
+      session: "morning",
+      role: "doctor",
+      hours: 2.5,
+    }];
+    const twoDayConfig: SchedulerConfig = {
+      startDate: "2026-08-10",
+      endDate: "2026-08-11",
+      seed: "workday-strength",
+      coverage: {doctors: 1, nurses: 0},
+    };
+
+    expect(
+      validateSchedule(oneDay, [absolute], [], twoDayConfig).some(
+        (issue) => issue.code === "ABSOLUTE_WORKDAYS_MISMATCH",
+      ),
+    ).toBe(true);
+    expect(
+      validateSchedule(oneDay, [preferred], [], twoDayConfig).some(
+        (issue) => issue.code === "ABSOLUTE_WORKDAYS_MISMATCH",
+      ),
+    ).toBe(false);
   });
 
   it("rejects segmented same-day shifts and allows consecutive shifts", () => {

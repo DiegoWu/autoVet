@@ -76,6 +76,59 @@ function offsetLocalDate(date: LocalDate, days: number): LocalDate {
   return parsed.toISOString().slice(0, 10);
 }
 
+export function prorateWeeklyTargetHours(
+  preferredWeeklyHours: number,
+  scheduledDaysInWeek: number,
+): number {
+  return (preferredWeeklyHours / 5) * Math.min(5, Math.max(0, scheduledDaysInWeek));
+}
+
+function buildWeeklyTargets(
+  employees: Employee[],
+  slots: Slot[],
+): Map<string, number> {
+  const datesByWeek = new Map<string, Set<LocalDate>>();
+  for (const slot of slots) {
+    const week = weekKey(slot.date);
+    const dates = datesByWeek.get(week) ?? new Set<LocalDate>();
+    dates.add(slot.date);
+    datesByWeek.set(week, dates);
+  }
+  const targets = new Map<string, number>();
+  for (const employee of employees) {
+    for (const [week, dates] of datesByWeek) {
+      targets.set(
+        `${employee.id}|${week}`,
+        prorateWeeklyTargetHours(employee.targetHoursPerWeek, dates.size),
+      );
+    }
+  }
+  return targets;
+}
+
+function buildWeeklyDayTargets(
+  employees: Employee[],
+  slots: Slot[],
+): Map<string, number> {
+  const datesByWeek = new Map<string, Set<LocalDate>>();
+  for (const slot of slots) {
+    const week = weekKey(slot.date);
+    const dates = datesByWeek.get(week) ?? new Set<LocalDate>();
+    dates.add(slot.date);
+    datesByWeek.set(week, dates);
+  }
+  const targets = new Map<string, number>();
+  for (const employee of employees) {
+    for (const [week, dates] of datesByWeek) {
+      targets.set(
+        `${employee.id}|${week}`,
+        Math.min(employee.preferredDaysPerWeek ?? 5, dates.size),
+      );
+    }
+  }
+  return targets;
+}
+
 function coverageFor(
   coverage: Coverage | CoverageRequirement[],
   date: LocalDate,
@@ -94,6 +147,13 @@ function coverageFor(
     }
   }
   return result;
+}
+
+function maxDoctorsForDate(
+  config: SchedulerConfig,
+  date: LocalDate,
+): number | undefined {
+  return config.maxDoctorsPerShiftByDate?.[date] ?? config.maxDoctorsPerShift;
 }
 
 export function validateSchedulerInput(
@@ -150,6 +210,21 @@ export function validateSchedulerInput(
         employeeId: employee.id,
       });
     }
+    if (
+      employee.preferredDaysPerWeek !== undefined &&
+      (
+        !Number.isInteger(employee.preferredDaysPerWeek) ||
+        employee.preferredDaysPerWeek < 1 ||
+        employee.preferredDaysPerWeek > 7
+      )
+    ) {
+      issues.push({
+        severity: "error",
+        code: "INVALID_PREFERRED_WORKDAYS",
+        message: `${employee.name} must prefer between 1 and 7 workdays per week.`,
+        employeeId: employee.id,
+      });
+    }
   }
 
   for (const item of timeOff) {
@@ -175,6 +250,7 @@ export function validateSchedulerInput(
 
   const requirements = Array.isArray(config.coverage) ? config.coverage : [config.coverage];
   for (const requirement of requirements) {
+    const requirementDate = (requirement as CoverageRequirement).date;
     if (
       !Number.isInteger(requirement.doctors) ||
       !Number.isInteger(requirement.nurses) ||
@@ -187,9 +263,12 @@ export function validateSchedulerInput(
         message: "Coverage counts must be non-negative integers.",
       });
     }
+    const applicableMaximum = requirementDate
+      ? maxDoctorsForDate(config, requirementDate)
+      : config.maxDoctorsPerShift;
     if (
-      config.maxDoctorsPerShift !== undefined &&
-      requirement.doctors > config.maxDoctorsPerShift
+      applicableMaximum !== undefined &&
+      requirement.doctors > applicableMaximum
     ) {
       issues.push({
         severity: "error",
@@ -207,6 +286,38 @@ export function validateSchedulerInput(
       code: "INVALID_MAX_DOCTORS",
       message: "Maximum doctors per shift must be a positive integer.",
     });
+  }
+  for (const [date, maximum] of Object.entries(
+    config.maxDoctorsPerShiftByDate ?? {},
+  )) {
+    if (
+      !parseLocalDate(date) ||
+      maximum === undefined ||
+      !Number.isInteger(maximum) ||
+      maximum < 1
+    ) {
+      issues.push({
+        severity: "error",
+        code: "INVALID_DATE_MAX_DOCTORS",
+        message: `${date} must have a positive integer maximum doctor count.`,
+        date,
+      });
+    }
+  }
+  for (const date of dates) {
+    const maximum = maxDoctorsForDate(config, date);
+    if (maximum === undefined) continue;
+    const exceedsMaximum = SESSION_IDS.some(
+      (session) => coverageFor(config.coverage, date, session).doctors > maximum,
+    );
+    if (exceedsMaximum) {
+      issues.push({
+        severity: "error",
+        code: "DOCTOR_MINIMUM_EXCEEDS_DATE_MAXIMUM",
+        message: `Minimum doctor coverage on ${date} exceeds its maximum of ${maximum}.`,
+        date,
+      });
+    }
   }
   if (config.candidateCount !== undefined && (!Number.isInteger(config.candidateCount) || config.candidateCount < 1)) {
     issues.push({
@@ -252,9 +363,87 @@ function isHardValid(
   employees: Employee[],
   config: SchedulerConfig,
 ): boolean {
-  return !validateLaborRules(proposed, employees, config.laborRules).some(
+  if (validateLaborRules(proposed, employees, config.laborRules).some(
     (issue) => issue.severity === "error",
-  );
+  )) return false;
+  const byId = new Map(employees.map((employee) => [employee.id, employee]));
+  if (proposed.some((assignment) => {
+    const employee = byId.get(assignment.employeeId);
+    if (!employee?.preferences?.avoidedCoworkerIds?.length) return false;
+    return proposed.some(
+      (coworker) =>
+        coworker.employeeId !== assignment.employeeId &&
+        coworker.date === assignment.date &&
+        coworker.session === assignment.session &&
+        employee.preferences?.avoidedCoworkerIds?.includes(coworker.employeeId),
+    );
+  })) return false;
+  for (const employee of employees.filter(
+    (item) =>
+      item.preferredDaysConstraint === "absolute" &&
+      item.preferredDaysPerWeek !== undefined,
+  )) {
+    const weeks = new Map<string, Set<LocalDate>>();
+    for (const assignment of proposed.filter(
+      (item) => item.employeeId === employee.id,
+    )) {
+      const week = weekKey(assignment.date);
+      const dates = weeks.get(week) ?? new Set<LocalDate>();
+      dates.add(assignment.date);
+      weeks.set(week, dates);
+    }
+    if ([...weeks.values()].some(
+      (dates) => dates.size > employee.preferredDaysPerWeek!,
+    )) return false;
+  }
+  return true;
+}
+
+function validateAbsoluteWorkdayTargets(
+  assignments: Assignment[],
+  employees: Employee[],
+  slots: Slot[],
+): ValidationIssue[] {
+  const datesByWeek = new Map<string, Set<LocalDate>>();
+  for (const slot of slots) {
+    const week = weekKey(slot.date);
+    const dates = datesByWeek.get(week) ?? new Set<LocalDate>();
+    dates.add(slot.date);
+    datesByWeek.set(week, dates);
+  }
+  const issues: ValidationIssue[] = [];
+  for (const employee of employees.filter(
+    (item) =>
+      item.active !== false &&
+      item.preferredDaysConstraint === "absolute" &&
+      item.preferredDaysPerWeek !== undefined,
+  )) {
+    for (const [week, scheduledDates] of datesByWeek) {
+      const requiredDays = Math.min(
+        employee.preferredDaysPerWeek!,
+        scheduledDates.size,
+      );
+      const assignedDays = new Set(
+        assignments
+          .filter(
+            (assignment) =>
+              assignment.employeeId === employee.id &&
+              weekKey(assignment.date) === week,
+          )
+          .map((assignment) => assignment.date),
+      ).size;
+      if (assignedDays !== requiredDays) {
+        issues.push({
+          severity: "error",
+          code: "ABSOLUTE_WORKDAYS_MISMATCH",
+          message: `${employee.name} must work exactly ${requiredDays} day(s) in week ${week}, but is assigned ${assignedDays}.`,
+          employeeId: employee.id,
+          date: week,
+        });
+      }
+    }
+  }
+  return issues;
 }
 
 function runAttempt(
@@ -268,6 +457,8 @@ function runAttempt(
   const assignments: Assignment[] = [];
   const unavailable = new Set(timeOff.map((item) => `${item.employeeId}|${item.date}`));
   const activeEmployees = employees.filter((employee) => employee.active !== false);
+  const weeklyTargets = buildWeeklyTargets(activeEmployees, slots);
+  const weeklyDayTargets = buildWeeklyDayTargets(activeEmployees, slots);
   const uncovered: Attempt["uncovered"] = [];
 
   const orderedSlots = [...slots].sort((left, right) => {
@@ -317,14 +508,44 @@ function runAttempt(
           };
           const valid = isHardValid([...assignments, assignment], employees, config);
           const hours = weeklyHours.get(`${employee.id}|${weekKey(slot.date)}`) ?? 0;
+          const weeklyTarget =
+            weeklyTargets.get(`${employee.id}|${weekKey(slot.date)}`) ??
+            employee.targetHoursPerWeek;
+          const employeeWeek = weekKey(slot.date);
+          const workedDates = new Set(
+            assignments
+              .filter(
+                (existing) =>
+                  existing.employeeId === employee.id &&
+                  weekKey(existing.date) === employeeWeek,
+              )
+              .map((existing) => existing.date),
+          );
+          const preferredDays =
+            weeklyDayTargets.get(`${employee.id}|${employeeWeek}`) ??
+            employee.preferredDaysPerWeek ??
+            5;
+          const dayDistance = Math.abs(
+            workedDates.size + Number(!workedDates.has(slot.date)) - preferredDays,
+          );
           const targetCompletion =
-            employee.targetHoursPerWeek > 0
-              ? (hours + assignment.hours) / employee.targetHoursPerWeek
+            weeklyTarget > 0
+              ? (hours + assignment.hours) / weeklyTarget
               : 10_000;
           const preference =
             employee.preferences?.preferredSessions?.includes(slot.session) ? -2 : 0;
           const avoidance =
             employee.preferences?.avoidedSessions?.includes(slot.session) ? 3 : 0;
+          const dateAvoidance =
+            employee.preferences?.avoidedDates?.includes(slot.date) ? 3 : 0;
+          const coworkerAvoidance = assignments.filter(
+            (existing) =>
+              existing.date === slot.date &&
+              existing.session === slot.session &&
+              employee.preferences?.discouragedCoworkerIds?.includes(
+                existing.employeeId,
+              ),
+          ).length;
           const weeklyPatternMatch = assignments.some(
             (existing) =>
               existing.employeeId === employee.id &&
@@ -341,9 +562,12 @@ function runAttempt(
             backupPriority: employee.backupOnly ? 1 : 0,
             priority:
               targetCompletion +
+              dayDistance * 0.12 +
               (weeklyPatternMatch ? -0.2 : 0) +
               preference * 0.03 +
               avoidance * 0.03 +
+              dateAvoidance * 0.08 +
+              coworkerAvoidance * 0.2 +
               random() * 0.05,
           };
         })
@@ -386,19 +610,31 @@ function runAttempt(
           .filter((employee) => !employee.backupOnly)
           .filter((employee) => {
             const current = hoursByEmployee.get(employee.id) ?? 0;
-            return employee.targetHoursPerWeek > current;
+            const target =
+              weeklyTargets.get(`${employee.id}|${week}`) ??
+              employee.targetHoursPerWeek;
+            return target > current;
           })
           .sort((left, right) => {
+            const leftTarget =
+              weeklyTargets.get(`${left.id}|${week}`) ??
+              left.targetHoursPerWeek;
+            const rightTarget =
+              weeklyTargets.get(`${right.id}|${week}`) ??
+              right.targetHoursPerWeek;
             const leftRatio =
-              (hoursByEmployee.get(left.id) ?? 0) / left.targetHoursPerWeek;
+              (hoursByEmployee.get(left.id) ?? 0) / leftTarget;
             const rightRatio =
-              (hoursByEmployee.get(right.id) ?? 0) / right.targetHoursPerWeek;
+              (hoursByEmployee.get(right.id) ?? 0) / rightTarget;
             return leftRatio - rightRatio || left.id.localeCompare(right.id);
           });
 
         for (const employee of underTarget) {
           const current = hoursByEmployee.get(employee.id) ?? 0;
-          const remaining = employee.targetHoursPerWeek - current;
+          const target =
+            weeklyTargets.get(`${employee.id}|${week}`) ??
+            employee.targetHoursPerWeek;
+          const remaining = target - current;
           const options = orderedSlots
             .filter(
               (slot) =>
@@ -407,13 +643,13 @@ function runAttempt(
                 !unavailable.has(`${employee.id}|${slot.date}`) &&
                 !(
                   employee.role === "doctor" &&
-                  config.maxDoctorsPerShift !== undefined &&
+                maxDoctorsForDate(config, slot.date) !== undefined &&
                   assignments.filter(
                     (assignment) =>
                       assignment.role === "doctor" &&
                       assignment.date === slot.date &&
                       assignment.session === slot.session,
-                  ).length >= config.maxDoctorsPerShift
+                ).length >= maxDoctorsForDate(config, slot.date)!
                 ) &&
                 !assignments.some(
                   (assignment) =>
@@ -433,6 +669,36 @@ function runAttempt(
               return {
                 assignment,
                 remainingAfter: remaining - assignment.hours,
+                dayDistance: (() => {
+                  const workedDates = new Set(
+                    assignments
+                      .filter(
+                        (existing) =>
+                          existing.employeeId === employee.id &&
+                          weekKey(existing.date) === week,
+                      )
+                      .map((existing) => existing.date),
+                  );
+                  const targetDays =
+                    weeklyDayTargets.get(`${employee.id}|${week}`) ??
+                    employee.preferredDaysPerWeek ??
+                    5;
+                  return Math.abs(
+                    workedDates.size +
+                    Number(!workedDates.has(assignment.date)) -
+                    targetDays,
+                  );
+                })(),
+                preferencePenalty:
+                  Number(employee.preferences?.avoidedDates?.includes(slot.date)) +
+                  assignments.filter(
+                    (existing) =>
+                      existing.date === slot.date &&
+                      existing.session === slot.session &&
+                      employee.preferences?.discouragedCoworkerIds?.includes(
+                        existing.employeeId,
+                      ),
+                  ).length,
                 weeklyPatternMatch: assignments.some(
                   (existing) =>
                     existing.employeeId === employee.id &&
@@ -450,6 +716,8 @@ function runAttempt(
             .sort(
               (left, right) =>
                 Math.abs(left.remainingAfter) - Math.abs(right.remainingAfter) ||
+                left.dayDistance - right.dayDistance ||
+                left.preferencePenalty - right.preferencePenalty ||
                 Number(right.weeklyPatternMatch) - Number(left.weeklyPatternMatch) ||
                 left.tieBreaker - right.tieBreaker,
             );
@@ -464,7 +732,10 @@ function runAttempt(
     }
   }
 
-  const issues = validateLaborRules(assignments, employees, config.laborRules);
+  const issues = [
+    ...validateLaborRules(assignments, employees, config.laborRules),
+    ...validateAbsoluteWorkdayTargets(assignments, activeEmployees, slots),
+  ];
   const scheduledWeeks = [...new Set(slots.map((slot) => weekKey(slot.date)))];
   for (const employee of activeEmployees.filter((item) => !item.backupOnly)) {
     for (const week of scheduledWeeks) {
@@ -475,11 +746,14 @@ function runAttempt(
             weekKey(assignment.date) === week,
         )
         .reduce((total, assignment) => total + assignment.hours, 0);
-      if (assignedHours + 0.01 < employee.targetHoursPerWeek) {
+      const target =
+        weeklyTargets.get(`${employee.id}|${week}`) ??
+        employee.targetHoursPerWeek;
+      if (assignedHours + 0.01 < target) {
         issues.push({
           severity: "warning",
           code: "TARGET_HOURS_UNMET",
-          message: `${employee.name} has ${assignedHours}h in week ${week}, below the ${employee.targetHoursPerWeek}h target.`,
+          message: `${employee.name} has ${assignedHours}h in week ${week}, below the ${target}h prorated target.`,
           employeeId: employee.id,
           date: week,
         });
@@ -499,6 +773,8 @@ export function scoreSchedule(
   assignments: Assignment[],
   employees: Employee[],
   weights: Partial<ScoreWeights> = {},
+  weeklyTargets?: ReadonlyMap<string, number>,
+  weeklyDayTargets?: ReadonlyMap<string, number>,
 ): ScoreBreakdown {
   const applied = { ...DEFAULT_WEIGHTS, ...weights };
   const byEmployee = new Map(employees.map((employee) => [employee.id, employee]));
@@ -524,6 +800,7 @@ export function scoreSchedule(
     }
     if (employee.preferences?.preferredSessions?.includes(assignment.session)) sessionPreference += 1;
     if (employee.preferences?.avoidedSessions?.includes(assignment.session)) sessionPreference -= 1;
+    if (employee.preferences?.avoidedDates?.includes(assignment.date)) sessionPreference -= 1;
 
     const peers = assignments.filter(
       (other) =>
@@ -536,6 +813,9 @@ export function scoreSchedule(
     ).length;
     coworker -= peers.filter((peer) =>
       employee.preferences?.avoidedCoworkerIds?.includes(peer.employeeId),
+    ).length;
+    coworker -= peers.filter((peer) =>
+      employee.preferences?.discouragedCoworkerIds?.includes(peer.employeeId),
     ).length;
   }
 
@@ -575,7 +855,27 @@ export function scoreSchedule(
   )) {
     for (const week of weeks) {
       const hours = weeklyHours.get(`${employee.id}|${week}`) ?? 0;
-      targetDistance += Math.abs(hours - employee.targetHoursPerWeek);
+      const target =
+        weeklyTargets?.get(`${employee.id}|${week}`) ??
+        employee.targetHoursPerWeek;
+      targetDistance += Math.abs(hours - target);
+      const workedDays = new Set(
+        assignments
+          .filter(
+            (assignment) =>
+              assignment.employeeId === employee.id &&
+              weekKey(assignment.date) === week,
+          )
+          .map((assignment) => assignment.date),
+      ).size;
+      const targetDays =
+        weeklyDayTargets?.get(`${employee.id}|${week}`) ??
+        employee.preferredDaysPerWeek;
+      if (targetDays !== undefined) {
+        targetDistance +=
+          Math.abs(workedDays - targetDays) *
+          (employee.targetHoursPerWeek / 5);
+      }
       overtime += Math.max(0, hours - 40);
     }
   }
@@ -616,8 +916,11 @@ export function validateSchedule(
 ): ValidationIssue[] {
   const issues = validateLaborRules(assignments, employees, config.laborRules);
   const dates = enumerateDates(config.startDate, config.endDate);
+  const slots = buildSlots(dates, config);
   const unavailable = new Set(timeOff.map((item) => `${item.employeeId}|${item.date}`));
   const assignmentKeys = new Set<string>();
+  const byEmployeeId = new Map(employees.map((employee) => [employee.id, employee]));
+  const reportedAvoidedPairs = new Set<string>();
   for (const assignment of assignments) {
     const assignmentKey = `${assignment.employeeId}|${assignment.date}|${assignment.session}`;
     if (assignmentKeys.has(assignmentKey)) {
@@ -641,8 +944,33 @@ export function validateSchedule(
         session: assignment.session,
       });
     }
+    const employee = byEmployeeId.get(assignment.employeeId);
+    for (const avoidedId of employee?.preferences?.avoidedCoworkerIds ?? []) {
+      const sharesShift = assignments.some(
+        (coworker) =>
+          coworker.employeeId === avoidedId &&
+          coworker.date === assignment.date &&
+          coworker.session === assignment.session,
+      );
+      const pairKey = [
+        assignment.date,
+        assignment.session,
+        ...[assignment.employeeId, avoidedId].sort(),
+      ].join("|");
+      if (sharesShift && !reportedAvoidedPairs.has(pairKey)) {
+        reportedAvoidedPairs.add(pairKey);
+        issues.push({
+          severity: "error",
+          code: "AVOIDED_COWORKER_PAIR",
+          message: `${assignment.employeeId} cannot share a shift with ${avoidedId}.`,
+          employeeId: assignment.employeeId,
+          date: assignment.date,
+          session: assignment.session,
+        });
+      }
+    }
   }
-  for (const slot of buildSlots(dates, config)) {
+  for (const slot of slots) {
     const count = assignments.filter(
       (assignment) =>
         assignment.date === slot.date &&
@@ -660,18 +988,20 @@ export function validateSchedule(
     }
     if (
       slot.role === "doctor" &&
-      config.maxDoctorsPerShift !== undefined &&
-      count > config.maxDoctorsPerShift
+      maxDoctorsForDate(config, slot.date) !== undefined &&
+      count > maxDoctorsForDate(config, slot.date)!
     ) {
+      const maximum = maxDoctorsForDate(config, slot.date)!;
       issues.push({
         severity: "error",
         code: "MAX_DOCTORS_EXCEEDED",
-        message: `${slot.date} ${slot.session} has ${count} doctors, above the maximum of ${config.maxDoctorsPerShift}.`,
+        message: `${slot.date} ${slot.session} has ${count} doctors, above the maximum of ${maximum}.`,
         date: slot.date,
         session: slot.session,
       });
     }
   }
+  issues.push(...validateAbsoluteWorkdayTargets(assignments, employees, slots));
   return issues;
 }
 
@@ -695,6 +1025,8 @@ export function generateScheduleCandidates(
 
   const dates = enumerateDates(config.startDate, config.endDate);
   const slots = buildSlots(dates, config);
+  const weeklyTargets = buildWeeklyTargets(employees, slots);
+  const weeklyDayTargets = buildWeeklyDayTargets(employees, slots);
   const requested = config.candidateCount ?? 3;
   const attempts = Math.max(20, requested * 12);
   const distinct = new Map<string, ScheduleCandidate>();
@@ -722,7 +1054,13 @@ export function generateScheduleCandidates(
             `${right.date}|${right.session}|${right.role}|${right.employeeId}`,
           ),
         ),
-        score: scoreSchedule(attempt.assignments, employees, config.scoreWeights),
+        score: scoreSchedule(
+          attempt.assignments,
+          employees,
+          config.scoreWeights,
+          weeklyTargets,
+          weeklyDayTargets,
+        ),
         warnings: attempt.issues.filter((issue) => issue.severity === "warning"),
       });
     }
