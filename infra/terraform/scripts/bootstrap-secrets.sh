@@ -11,8 +11,28 @@ for command in terraform gcloud python3 cloud-sql-proxy psql pg_isready openssl;
   fi
 done
 
-tf_output() {
-  terraform -chdir="${TF_DIR}" output -raw "$1"
+tf_state_value() {
+  local resource_type="$1"
+  local resource_name="$2"
+  local attribute="$3"
+  terraform -chdir="${TF_DIR}" show -json |
+    python3 -c '
+import json, sys
+resource_type, resource_name, attribute = sys.argv[1:4]
+state = json.load(sys.stdin)
+resources = state.get("values", {}).get("root_module", {}).get("resources", [])
+for resource in resources:
+    if resource.get("type") == resource_type and resource.get("name") == resource_name:
+        value = resource.get("values", {}).get(attribute)
+        if value in (None, ""):
+            break
+        print(value)
+        raise SystemExit(0)
+raise SystemExit(
+    f"{resource_type}.{resource_name}.{attribute} was not found in Terraform state. "
+    "Finish the targeted terraform apply first."
+)
+' "${resource_type}" "${resource_name}" "${attribute}"
 }
 
 add_secret_version() {
@@ -37,12 +57,12 @@ read_required_secret() {
   printf '%s' "${value}"
 }
 
-PROJECT_ID="$(tf_output project_id)"
-INSTANCE_NAME="$(tf_output cloud_sql_instance_name)"
-CONNECTION_NAME="$(tf_output cloud_sql_connection_name)"
-DATABASE_NAME="$(tf_output database_name)"
-RUNTIME_USER="$(tf_output database_runtime_user)"
-MIGRATION_USER="$(tf_output database_migration_user)"
+PROJECT_ID="$(tf_state_value google_sql_database_instance postgres project)"
+INSTANCE_NAME="$(tf_state_value google_sql_database_instance postgres name)"
+CONNECTION_NAME="$(tf_state_value google_sql_database_instance postgres connection_name)"
+DATABASE_NAME="$(tf_state_value google_sql_database app name)"
+RUNTIME_USER="$(tf_state_value google_sql_user runtime name)"
+MIGRATION_USER="$(tf_state_value google_sql_user migration name)"
 
 for identifier in "${DATABASE_NAME}" "${RUNTIME_USER}" "${MIGRATION_USER}"; do
   if [[ ! "${identifier}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
@@ -125,6 +145,7 @@ GRANT USAGE, CREATE ON SCHEMA public TO "${MIGRATION_USER}";
 GRANT USAGE ON SCHEMA public TO "${RUNTIME_USER}";
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "${RUNTIME_USER}";
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${RUNTIME_USER}";
+GRANT "${MIGRATION_USER}" TO postgres;
 ALTER DEFAULT PRIVILEGES FOR ROLE "${MIGRATION_USER}" IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "${RUNTIME_USER}";
 ALTER DEFAULT PRIVILEGES FOR ROLE "${MIGRATION_USER}" IN SCHEMA public

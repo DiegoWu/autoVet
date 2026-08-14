@@ -11,7 +11,7 @@ This directory provisions the Google Cloud baseline for `DiegoWu/autoVet`:
 
 ## Prerequisites
 
-- Terraform 1.7 or newer
+- Terraform 1.11 or newer
 - a Google Cloud identity allowed to enable APIs and create the resources in this module
 - `gcloud` authenticated to project `autovet`
 - for secret bootstrap: `cloud-sql-proxy`, `psql`, `pg_isready`, Python 3, and OpenSSL

@@ -121,6 +121,7 @@ resource "google_sql_database_instance" "postgres" {
   deletion_protection = var.database_deletion_protection
 
   settings {
+    edition           = "ENTERPRISE"
     tier              = var.database_tier
     availability_type = "ZONAL"
     disk_type         = "PD_SSD"
@@ -170,26 +171,33 @@ resource "google_sql_database" "app" {
   name     = var.database_name
 }
 
-# Passwords are deliberately omitted and ignored. The bootstrap script sets them
-# through the Cloud SQL Admin API so no credential payload enters Terraform state.
-resource "google_sql_user" "runtime" {
-  project  = var.project_id
-  instance = google_sql_database_instance.postgres.name
-  name     = var.database_runtime_user
+# Cloud SQL for PostgreSQL requires a password at user creation. These
+# write-only values are disposable bootstrap secrets: they are not stored in
+# Terraform state. bootstrap-secrets.sh immediately replaces them.
+ephemeral "random_password" "runtime" {
+  length  = 32
+  special = false
+}
 
-  lifecycle {
-    ignore_changes = [password]
-  }
+ephemeral "random_password" "migration" {
+  length  = 32
+  special = false
+}
+
+resource "google_sql_user" "runtime" {
+  project             = var.project_id
+  instance            = google_sql_database_instance.postgres.name
+  name                = var.database_runtime_user
+  password_wo         = ephemeral.random_password.runtime.result
+  password_wo_version = 1
 }
 
 resource "google_sql_user" "migration" {
-  project  = var.project_id
-  instance = google_sql_database_instance.postgres.name
-  name     = var.database_migration_user
-
-  lifecycle {
-    ignore_changes = [password]
-  }
+  project             = var.project_id
+  instance            = google_sql_database_instance.postgres.name
+  name                = var.database_migration_user
+  password_wo         = ephemeral.random_password.migration.result
+  password_wo_version = 1
 }
 
 resource "google_secret_manager_secret" "app" {

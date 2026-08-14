@@ -70,7 +70,7 @@ variable "database_migration_user" {
 }
 
 variable "database_tier" {
-  description = "Cloud SQL machine tier."
+  description = "Cloud SQL machine tier for the Enterprise edition. Enterprise Plus requires db-perf-optimized-N-* instead."
   type        = string
   default     = "db-custom-1-3840"
 }

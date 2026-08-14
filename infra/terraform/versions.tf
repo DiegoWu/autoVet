@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.7.0, < 2.0.0"
+  required_version = ">= 1.11.0, < 2.0.0"
 
   backend "gcs" {}
 
@@ -7,6 +7,10 @@ terraform {
     google = {
       source  = "hashicorp/google"
       version = ">= 6.31.0, < 8.0.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = ">= 3.7.2"
     }
   }
 }

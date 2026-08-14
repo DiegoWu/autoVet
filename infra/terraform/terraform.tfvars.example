@@ -10,7 +10,7 @@ github_environment = "production"
 database_name                = "autovet"
 database_runtime_user        = "autovet_runtime"
 database_migration_user      = "autovet_migration"
-database_tier                = "db-custom-1-3840"
+database_tier                = "db-f1-micro"
 database_disk_size_gb        = 20
 database_deletion_protection = true
 
