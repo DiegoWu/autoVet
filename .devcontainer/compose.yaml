@@ -1,0 +1,54 @@
+name: autovet-dev
+
+services:
+  workspace:
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+    init: true
+    working_dir: /workspaces/autoWork
+    command: sleep infinity
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://autovet:autovet-dev-only@db:5432/autovet
+      ADMIN_EMAIL: ""
+      ADMIN_PASSWORD_HASH: ""
+      AUTH_SECRET: ""
+      OPENAI_API_KEY: ""
+      NEXT_TELEMETRY_DISABLED: "1"
+      CLOUDSDK_CONFIG: /home/node/.config/gcloud
+      PLAYWRIGHT_BROWSERS_PATH: /home/node/.cache/ms-playwright
+      TF_PLUGIN_CACHE_DIR: /home/node/.terraform.d/plugin-cache
+    volumes:
+      - ..:/workspaces/autoWork:cached
+      - node-modules:/workspaces/autoWork/node_modules
+      - npm-cache:/home/node/.npm
+      - playwright-cache:/home/node/.cache/ms-playwright
+      - terraform-cache:/home/node/.terraform.d/plugin-cache
+      - gcloud-config:/home/node/.config/gcloud
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: autovet
+      POSTGRES_USER: autovet
+      POSTGRES_PASSWORD: autovet-dev-only
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U autovet -d autovet"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  gcloud-config:
+  node-modules:
+  npm-cache:
+  playwright-cache:
+  postgres-data:
+  terraform-cache:
