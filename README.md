@@ -4,6 +4,61 @@ autoVet is a bilingual monthly roster builder for Taiwanese veterinary clinics. 
 
 Traditional Chinese (`zh-TW`) is the default. English is available from the header.
 
+## Dev Container
+
+The recommended local environment is the repository Dev Container. It provides Node.js 22, PostgreSQL 17, Terraform 1.13.5, Google Cloud CLI, Cloud SQL Auth Proxy, `psql`, Playwright Chromium, and Docker/Compose tooling without installing them directly on macOS.
+
+Requirements:
+
+- Docker Desktop
+- Cursor with the Anysphere Remote Containers extension
+
+Open the repository in Cursor, run **Dev Containers: Reopen in Container**, and wait for setup to finish. The first build installs npm dependencies and Chromium, initializes Terraform providers, starts the isolated development database, and applies committed Prisma migrations.
+
+Start the application inside the Dev Container:
+
+```bash
+npm run dev -- --hostname 0.0.0.0
+```
+
+Open the forwarded port 3000. Local administrator authentication and OpenAI integration are disabled by default; PostgreSQL is available only through the internal `db:5432` Compose hostname.
+
+Useful commands inside the container:
+
+```bash
+# Add optional demo records
+npm run db:seed
+
+# Create a migration while developing a schema change
+npm run db:migrate
+
+# Match CI before pushing
+npm run lint
+npm run typecheck
+npm test
+npm run build
+
+# Authenticate the isolated gcloud profile
+gcloud auth login --no-launch-browser
+gcloud auth application-default login --no-launch-browser
+
+# Work with the Cloud Run infrastructure
+terraform -chdir=infra/terraform fmt -check -recursive
+terraform -chdir=infra/terraform validate
+```
+
+The gcloud profile, PostgreSQL data, npm cache, `node_modules`, Playwright browsers, and Terraform plugin cache persist in named volumes across ordinary container rebuilds. **Dev Containers: Rebuild Container** refreshes the image without deleting those volumes.
+
+To remove the entire development environment, including its database and isolated gcloud credentials:
+
+```bash
+docker compose -f .devcontainer/compose.yaml down -v
+```
+
+The Dev Container uses Docker Desktop through the host Docker socket. This is effectively administrative access to Docker Desktop, including its containers, images, volumes, and host-shared files. Use it only with trusted repositories and agents. Production secrets and service-account keys must not be stored in the Dev Container.
+
+The development stack in `.devcontainer/compose.yaml` is separate from the production-like root `compose.yaml`; do not use them interchangeably.
+
 ## Docker deployment
 
 Requirements: Docker Engine with Docker Compose.
@@ -104,6 +159,68 @@ npm run build
 ```
 
 Scheduler tests cover deterministic output, seed diversity, hard coverage, time off, maximum daily hours, consecutive work days, flexible-hours opt-in, and impossible inputs.
+
+## Google Cloud Run deployment
+
+The production baseline in `infra/terraform` targets Google Cloud project `autovet` (`647145801184`) in `asia-east1`. It provisions Artifact Registry, Cloud Run, a separate migration job, Cloud SQL PostgreSQL, Secret Manager, Cloud Scheduler, and keyless GitHub Workload Identity Federation.
+
+Cloud Run uses zero minimum instances and a maximum of three. Scheduler sends an authenticated health request every five minutes to reduce cold starts. This is best-effort only: Cloud Run can still remove an idle instance, and guaranteed warm capacity requires setting the minimum to one.
+
+### One-time bootstrap
+
+Requirements: Terraform 1.7+, Google Cloud CLI, Cloud SQL Auth Proxy, `psql`, Python 3, and OpenSSL.
+
+1. Create a versioned GCS state bucket with uniform access and public-access prevention, then initialize:
+
+   ```bash
+   export TF_STATE_BUCKET=autovet-terraform-state-647145801184
+   gcloud storage buckets create "gs://${TF_STATE_BUCKET}" \
+     --project=autovet \
+     --location=asia-east1 \
+     --uniform-bucket-level-access \
+     --public-access-prevention
+   gcloud storage buckets update "gs://${TF_STATE_BUCKET}" --versioning
+
+   cp infra/terraform/terraform.tfvars.example infra/terraform/terraform.tfvars
+   terraform -chdir=infra/terraform init \
+     -backend-config="bucket=${TF_STATE_BUCKET}" \
+     -backend-config="prefix=autovet/production"
+   ```
+
+2. Follow the staged foundation apply and interactive secret setup in `infra/terraform/README.md`. Secret payloads are added directly to Secret Manager and never passed through Terraform.
+
+3. Complete a normal `terraform apply`. Grant `autovet-terraform@autovet.iam.gserviceaccount.com` `roles/storage.objectAdmin` on the state bucket so the protected Terraform workflow can manage later changes.
+
+4. Create a protected GitHub environment named `production`, ideally with required reviewers. Configure these repository variables from Terraform outputs:
+
+   ```text
+   GCP_PROJECT_ID=autovet
+   GCP_REGION=asia-east1
+   ARTIFACT_REGISTRY_REPOSITORY=autovet
+   CLOUD_RUN_SERVICE=autovet-app
+   CLOUD_RUN_MIGRATION_JOB=autovet-migrate
+   WIF_PROVIDER=<github_main_workload_identity_provider>
+   ENVIRONMENT_WIF_PROVIDER=<github_environment_workload_identity_provider>
+   DEPLOYER_SERVICE_ACCOUNT=autovet-github-deployer@autovet.iam.gserviceaccount.com
+   MIGRATION_EXECUTOR_SERVICE_ACCOUNT=autovet-github-migrations@autovet.iam.gserviceaccount.com
+   TERRAFORM_SERVICE_ACCOUNT=autovet-terraform@autovet.iam.gserviceaccount.com
+   TF_STATE_BUCKET=autovet-terraform-state-647145801184
+   TF_STATE_PREFIX=autovet/production
+   ```
+
+No Google service-account key or production application secret belongs in GitHub.
+
+### Delivery and operations
+
+- Pull requests and pushes run lint, type-checking, unit tests, a production build, and Terraform validation.
+- A successful `main` build creates immutable runner and migration images, runs the migration job with its dedicated identity, and deploys only after migration succeeds.
+- Infrastructure applies are manual, use the protected `production` environment, and run as a separate Terraform identity.
+- Roll back application code by redeploying a previous Artifact Registry digest. Database migrations must follow backward-compatible expand/migrate/contract changes so an older revision remains safe.
+- View runtime logs with `gcloud run services logs read autovet-app --project autovet --region asia-east1`.
+- Rotate a secret by adding a Secret Manager version, updating its numeric value in Terraform's `secret_versions`, and applying Terraform.
+- Cloud SQL has automated backups, point-in-time recovery, connector-only access, and deletion protection. Test restoration before relying on it operationally.
+
+The local Docker Compose deployment remains the development path. `.env.cloudrun.example` documents the runtime-to-Secret-Manager mapping without containing deployable credentials.
 
 ## Alternative deployment
 

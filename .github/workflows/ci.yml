@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  application:
+    name: Application checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://build:build@localhost:5432/autovet
+      AUTH_SECRET: ci-only-auth-secret-not-used-in-production
+      ADMIN_EMAIL: admin@example.invalid
+      ADMIN_PASSWORD_HASH: '$2b$12$000000000000000000000uHnC1JbMZQyG2f5xH0kXQvQj1oZg6u'
+      NEXT_TELEMETRY_DISABLED: 1
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Build production application
+        run: npm run build
+
+  terraform:
+    name: Terraform checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+      TF_DIR: infra/terraform
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Detect Terraform configuration
+        id: terraform
+        shell: bash
+        run: |
+          if compgen -G "${TF_DIR}/*.tf" > /dev/null; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "No Terraform configuration exists yet; skipping Terraform checks."
+          fi
+
+      - name: Set up Terraform
+        if: steps.terraform.outputs.present == 'true'
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Check Terraform formatting
+        if: steps.terraform.outputs.present == 'true'
+        run: terraform fmt -check -recursive "$TF_DIR"
+
+      - name: Initialize Terraform without backend
+        if: steps.terraform.outputs.present == 'true'
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init -backend=false
+
+      - name: Validate Terraform
+        if: steps.terraform.outputs.present == 'true'
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform validate

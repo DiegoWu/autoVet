@@ -1,0 +1,31 @@
+project_id        = "autovet"
+project_number    = "647145801184"
+region            = "asia-east1"
+resource_prefix   = "autovet"
+github_repository = "DiegoWu/autoVet"
+github_repository_id = "1330397629"
+github_repository_owner_id = "85223569"
+github_environment = "production"
+
+database_name                = "autovet"
+database_runtime_user        = "autovet_runtime"
+database_migration_user      = "autovet_migration"
+database_tier                = "db-custom-1-3840"
+database_disk_size_gb        = 20
+database_deletion_protection = true
+
+app_cpu           = "2"
+app_memory        = "1Gi"
+app_concurrency   = 4
+app_max_instances = 3
+
+scheduler_timezone = "Asia/Taipei"
+
+secret_versions = {
+  admin-email            = "1"
+  admin-password-hash    = "1"
+  auth-secret            = "1"
+  database-url-migration = "1"
+  database-url-runtime   = "1"
+  openai-api-key         = "1"
+}

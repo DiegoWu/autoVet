@@ -1,0 +1,246 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Build images and update migration job
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    outputs:
+      runner_digest: ${{ steps.build-runner.outputs.digest }}
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      CLOUD_RUN_MIGRATION_JOB: ${{ vars.CLOUD_RUN_MIGRATION_JOB }}
+      ARTIFACT_REGISTRY_REPOSITORY: ${{ vars.ARTIFACT_REGISTRY_REPOSITORY }}
+      WIF_PROVIDER: ${{ vars.WIF_PROVIDER }}
+      DEPLOYER_SERVICE_ACCOUNT: ${{ vars.DEPLOYER_SERVICE_ACCOUNT }}
+      COMMIT_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Check required repository variables
+        shell: bash
+        run: |
+          required=(
+            GCP_PROJECT_ID
+            GCP_REGION
+            CLOUD_RUN_MIGRATION_JOB
+            ARTIFACT_REGISTRY_REPOSITORY
+            WIF_PROVIDER
+            DEPLOYER_SERVICE_ACCOUNT
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Repository variable ${name} is required."
+              exit 1
+            fi
+          done
+
+      - name: Check out successful commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.COMMIT_SHA }}
+          persist-credentials: false
+
+      - name: Authenticate as deployer
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Configure Artifact Registry authentication
+        shell: bash
+        run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+
+      - name: Set immutable image names
+        shell: bash
+        run: |
+          registry="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${ARTIFACT_REGISTRY_REPOSITORY}"
+          {
+            echo "RUNNER_IMAGE=${registry}/autovet-runner:${COMMIT_SHA}"
+            echo "MIGRATE_IMAGE_BASE=${registry}/autovet-migrate"
+            echo "MIGRATE_IMAGE=${registry}/autovet-migrate:${COMMIT_SHA}"
+          } >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push application image
+        id: build-runner
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runner
+          push: true
+          tags: ${{ env.RUNNER_IMAGE }}
+          cache-from: type=gha,scope=runner
+          cache-to: type=gha,mode=max,scope=runner
+
+      - name: Build and push migration image
+        id: build-migrate
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: migrate
+          push: true
+          tags: ${{ env.MIGRATE_IMAGE }}
+          cache-from: type=gha,scope=migrate
+          cache-to: type=gha,mode=max,scope=migrate
+
+      - name: Update migration job image
+        env:
+          MIGRATE_DIGEST: ${{ steps.build-migrate.outputs.digest }}
+        shell: bash
+        run: |
+          gcloud run jobs update "$CLOUD_RUN_MIGRATION_JOB" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --image "${MIGRATE_IMAGE_BASE}@${MIGRATE_DIGEST}" \
+            --quiet
+
+  migrate:
+    name: Execute database migration
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      CLOUD_RUN_MIGRATION_JOB: ${{ vars.CLOUD_RUN_MIGRATION_JOB }}
+      ENVIRONMENT_WIF_PROVIDER: ${{ vars.ENVIRONMENT_WIF_PROVIDER }}
+      MIGRATION_EXECUTOR_SERVICE_ACCOUNT: ${{ vars.MIGRATION_EXECUTOR_SERVICE_ACCOUNT }}
+    steps:
+      - name: Check required repository variables
+        shell: bash
+        run: |
+          required=(
+            GCP_PROJECT_ID
+            GCP_REGION
+            CLOUD_RUN_MIGRATION_JOB
+            ENVIRONMENT_WIF_PROVIDER
+            MIGRATION_EXECUTOR_SERVICE_ACCOUNT
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Repository variable ${name} is required."
+              exit 1
+            fi
+          done
+
+      - name: Authenticate as migration executor
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.ENVIRONMENT_WIF_PROVIDER }}
+          service_account: ${{ env.MIGRATION_EXECUTOR_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Execute migration and wait
+        shell: bash
+        run: |
+          gcloud run jobs execute "$CLOUD_RUN_MIGRATION_JOB" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --wait \
+            --quiet
+
+  release:
+    name: Deploy application and smoke-check
+    needs:
+      - prepare
+      - migrate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
+      ARTIFACT_REGISTRY_REPOSITORY: ${{ vars.ARTIFACT_REGISTRY_REPOSITORY }}
+      WIF_PROVIDER: ${{ vars.WIF_PROVIDER }}
+      DEPLOYER_SERVICE_ACCOUNT: ${{ vars.DEPLOYER_SERVICE_ACCOUNT }}
+      RUNNER_DIGEST: ${{ needs.prepare.outputs.runner_digest }}
+    steps:
+      - name: Check required repository variables
+        shell: bash
+        run: |
+          required=(
+            GCP_PROJECT_ID
+            GCP_REGION
+            CLOUD_RUN_SERVICE
+            ARTIFACT_REGISTRY_REPOSITORY
+            WIF_PROVIDER
+            DEPLOYER_SERVICE_ACCOUNT
+            RUNNER_DIGEST
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Repository variable or image digest ${name} is required."
+              exit 1
+            fi
+          done
+
+      - name: Authenticate as deployer
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Deploy application image digest
+        shell: bash
+        run: |
+          image="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${ARTIFACT_REGISTRY_REPOSITORY}/autovet-runner@${RUNNER_DIGEST}"
+          gcloud run services update "$CLOUD_RUN_SERVICE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_REGION" \
+            --image "$image" \
+            --quiet
+
+      - name: Smoke-check health endpoint
+        shell: bash
+        run: |
+          service_url="$(
+            gcloud run services describe "$CLOUD_RUN_SERVICE" \
+              --project "$GCP_PROJECT_ID" \
+              --region "$GCP_REGION" \
+              --format='value(status.url)'
+          )"
+          test -n "$service_url"
+          curl \
+            --fail-with-body \
+            --show-error \
+            --silent \
+            --retry 12 \
+            --retry-all-errors \
+            --retry-delay 5 \
+            --retry-max-time 180 \
+            --connect-timeout 10 \
+            --max-time 20 \
+            "${service_url}/api/health"
