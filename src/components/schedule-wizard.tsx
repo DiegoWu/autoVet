@@ -63,8 +63,8 @@ const weekdays = [
 const starterStaff: Employee[] = [
   {id: "d1", name: "張嘉欣", role: "DOCTOR", targetWeeklyHours: 40, expertise: "內科", daysOff: []},
   {id: "d2", name: "蔡靜文", role: "DOCTOR", targetWeeklyHours: 32, expertise: "犬貓照護", daysOff: []},
-  {id: "n1", name: "廖慧玲", role: "NURSE", targetWeeklyHours: 40, expertise: "住院照護", daysOff: []},
-  {id: "n2", name: "陳怡安", role: "NURSE", targetWeeklyHours: 32, expertise: "門診照護", daysOff: []},
+  {id: "d3", name: "廖惠玲", role: "DOCTOR", backupOnly: true, targetWeeklyHours: 10, expertise: "住院照護", daysOff: []},
+  {id: "d4", name: "廖慈惠", role: "DOCTOR", targetWeeklyHours: 32, expertise: "門診照護", daysOff: []},
 ];
 
 function monthDates(month: string) {
