@@ -1,7 +1,7 @@
 import {NextResponse} from "next/server";
 import {z} from "zod";
 import {getPrisma} from "@/lib/db";
-import {getAdminCookieName, verifyAdminSession} from "@/lib/auth";
+import {isAdminRequestAuthorized} from "@/lib/auth";
 import type {Prisma} from "@/generated/prisma/client";
 
 const SaveSchema = z.object({
@@ -132,14 +132,8 @@ const SaveSchema = z.object({
   }
 });
 
-async function isAuthorized(request: Request) {
-  if (process.env.NODE_ENV === "development" && !process.env.ADMIN_EMAIL) return true;
-  const cookie = request.headers.get("cookie")?.match(new RegExp(`(?:^|;\\s*)${getAdminCookieName()}=([^;]+)`))?.[1];
-  return Boolean(await verifyAdminSession(cookie ? decodeURIComponent(cookie) : null));
-}
-
 export async function GET(request: Request) {
-  if (!await isAuthorized(request)) return NextResponse.json({error: "Unauthorized"}, {status: 401});
+  if (!await isAdminRequestAuthorized(request)) return NextResponse.json({error: "Unauthorized"}, {status: 401});
   try {
     const prisma = await getPrisma();
     const runs = await prisma.scheduleRun.findMany({
@@ -193,7 +187,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  if (!await isAuthorized(request)) return NextResponse.json({error: "Unauthorized"}, {status: 401});
+  if (!await isAdminRequestAuthorized(request)) return NextResponse.json({error: "Unauthorized"}, {status: 401});
   const parsed = SaveSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({error: "Invalid schedule", issues: parsed.error.issues}, {status: 400});
 

@@ -2,6 +2,7 @@ import {NextResponse} from "next/server";
 import {z} from "zod";
 import {addDays, endOfMonth, format, getDay, startOfMonth} from "date-fns";
 import {generateScheduleCandidates, type CoverageRequirement, type SessionId} from "@/lib/scheduler";
+import {isAdminRequestAuthorized} from "@/lib/auth";
 
 const InputSchema = z.object({
   mode: z.enum(["DOCTOR_ONLY", "DOCTOR_NURSE"]).default("DOCTOR_NURSE"),
@@ -117,6 +118,9 @@ const InputSchema = z.object({
 const sessionIds: SessionId[] = ["morning", "afternoon", "evening"];
 
 export async function POST(request: Request) {
+  if (!await isAdminRequestAuthorized(request)) {
+    return NextResponse.json({error: "Unauthorized"}, {status: 401});
+  }
   const parsed = InputSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({error: "Invalid scheduling input", issues: parsed.error.issues}, {status: 400});
   const input = parsed.data;

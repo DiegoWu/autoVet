@@ -164,6 +164,15 @@ export function readAdminToken(cookieHeader: string | null): string | null {
   return null;
 }
 
+export async function isAdminRequestAuthorized(request: Request): Promise<boolean> {
+  if (process.env.NODE_ENV === "development" && !process.env.ADMIN_EMAIL) {
+    return true;
+  }
+  return Boolean(
+    await verifyAdminSession(readAdminToken(request.headers.get("cookie"))),
+  );
+}
+
 export function serializeSessionCookie(cookie: SessionCookie): string {
   const parts = [
     `${cookie.name}=${encodeURIComponent(cookie.value)}`,
