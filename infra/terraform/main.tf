@@ -273,6 +273,18 @@ resource "google_service_account_iam_member" "github_deployer_act_as_runtime" {
   member             = "serviceAccount:${google_service_account.app["github_deployer"].email}"
 }
 
+resource "google_service_account_iam_member" "github_deployer_self_token" {
+  service_account_id = google_service_account.app["github_deployer"].name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_service_account.app["github_deployer"].email}"
+}
+
+resource "google_service_account_iam_member" "github_deployer_wif_token" {
+  service_account_id = google_service_account.app["github_deployer"].name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "${local.wif_principal_prefix}/${local.github_main_subject}"
+}
+
 resource "google_project_iam_member" "terraform_provisioner" {
   for_each = local.terraform_provisioner_roles
 
