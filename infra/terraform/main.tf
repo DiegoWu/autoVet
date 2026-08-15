@@ -614,6 +614,14 @@ resource "google_cloud_run_v2_job_iam_member" "github_migration_executor" {
   member   = "serviceAccount:${google_service_account.app["github_migration_executor"].email}"
 }
 
+resource "google_cloud_run_v2_job_iam_member" "github_migration_viewer" {
+  project  = var.project_id
+  location = google_cloud_run_v2_job.migration.location
+  name     = google_cloud_run_v2_job.migration.name
+  role     = "roles/run.viewer"
+  member   = "serviceAccount:${google_service_account.app["github_migration_executor"].email}"
+}
+
 resource "google_cloud_run_v2_service_iam_member" "scheduler" {
   project  = var.project_id
   location = google_cloud_run_v2_service.app.location
