@@ -32,3 +32,11 @@ export const ScheduleStatus = {
 } as const
 
 export type ScheduleStatus = (typeof ScheduleStatus)[keyof typeof ScheduleStatus]
+
+
+export const UserRole = {
+  OWNER: 'OWNER',
+  MEMBER: 'MEMBER'
+} as const
+
+export type UserRole = (typeof UserRole)[keyof typeof UserRole]

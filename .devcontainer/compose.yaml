@@ -13,9 +13,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://autovet:autovet-dev-only@db:5432/autovet
-      ADMIN_EMAIL: ""
-      ADMIN_PASSWORD_HASH: ""
-      AUTH_SECRET: ""
+      AUTH_SECRET: local-dev-auth-secret-not-for-production
       OPENAI_API_KEY: ""
       NEXT_TELEMETRY_DISABLED: "1"
       CLOUDSDK_CONFIG: /home/node/.config/gcloud

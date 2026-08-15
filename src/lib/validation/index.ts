@@ -157,13 +157,24 @@ export const manualAssignmentUpdateSchema = z
     "No updates supplied",
   );
 
-export const adminLoginSchema = z
+export const userLoginSchema = z
   .object({
     email: z.email().max(320),
     password: z.string().min(1).max(1_024),
   })
   .strict();
 
+export const userSignupSchema = z
+  .object({
+    clinicName: z.string().trim().min(1).max(200),
+    name: z.string().trim().min(1).max(200),
+    email: z.email().max(320),
+    password: z.string().min(8).max(1_024),
+  })
+  .strict();
+
+export type UserLoginInput = z.infer<typeof userLoginSchema>;
+export type UserSignupInput = z.infer<typeof userSignupSchema>;
 export type ClinicSetupInput = z.infer<typeof clinicSetupSchema>;
 export type CreateEmployeeInput = z.infer<typeof createEmployeeSchema>;
 export type UpdateEmployeeInput = z.infer<typeof updateEmployeeSchema>;

@@ -23,6 +23,11 @@ enum ScheduleStatus {
   ARCHIVED
 }
 
+enum UserRole {
+  OWNER
+  MEMBER
+}
+
 model Clinic {
   id                String        @id @default(cuid())
   name              String
@@ -32,10 +37,25 @@ model Clinic {
   minNurses         Int           @default(1)
   flexibleHoursMode Boolean       @default(false)
   approvalAttested  Boolean       @default(false)
+  users             User[]
   employees         Employee[]
   scheduleRuns      ScheduleRun[]
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         UserRole @default(OWNER)
+  clinicId     String
+  clinic       Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([clinicId])
 }
 
 model Employee {

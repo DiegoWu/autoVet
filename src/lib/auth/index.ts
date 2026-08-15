@@ -1,15 +1,18 @@
-import { compare } from "bcryptjs";
-import { jwtVerify, SignJWT, type JWTPayload } from "jose";
-import { adminLoginSchema } from "@/lib/validation";
+import {compare, hash} from "bcryptjs";
+import {jwtVerify, SignJWT, type JWTPayload} from "jose";
+import {Prisma} from "@/generated/prisma/client";
+import {getPrisma} from "@/lib/db";
+import {userLoginSchema, userSignupSchema} from "@/lib/validation";
 
 const ISSUER = "autovet";
-const AUDIENCE = "autovet-admin";
+const AUDIENCE = "autovet-user";
 const DEFAULT_TTL_SECONDS = 60 * 60 * 12;
 
-export interface AdminSession extends JWTPayload {
-  sub: "admin";
-  role: "admin";
+export interface UserSession extends JWTPayload {
+  sub: string;
   email: string;
+  clinicId: string;
+  role: "OWNER" | "MEMBER";
 }
 
 export interface SessionCookie {
@@ -36,9 +39,9 @@ function isSecureCookie(): boolean {
   return process.env.NODE_ENV !== "development";
 }
 
-export function getAdminCookieName(): string {
+export function getSessionCookieName(): string {
   if (process.env.AUTH_COOKIE_NAME) return process.env.AUTH_COOKIE_NAME;
-  return isSecureCookie() ? "__Host-autovet_admin" : "autovet_admin";
+  return isSecureCookie() ? "__Host-autovet" : "autovet_session";
 }
 
 function getAuthSecret(): Uint8Array {
@@ -49,41 +52,78 @@ function getAuthSecret(): Uint8Array {
   return new TextEncoder().encode(secret);
 }
 
-function getAdminCredentials(): { email: string; passwordHash: string } {
-  const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
-  const passwordHash = process.env.ADMIN_PASSWORD_HASH?.trim();
-  if (!email || !passwordHash) {
-    throw new Error(
-      "ADMIN_EMAIL and ADMIN_PASSWORD_HASH are required for admin login.",
-    );
-  }
-  return { email, passwordHash };
-}
-
-export async function authenticateAdmin(payload: {
+export async function signUp(payload: {
+  clinicName: string;
+  name: string;
   email: string;
   password: string;
-}): Promise<boolean> {
-  const input = adminLoginSchema.parse(payload);
-  const credentials = getAdminCredentials();
-  const passwordMatches = await compare(
-    input.password,
-    credentials.passwordHash,
-  );
+}): Promise<UserSession> {
+  const input = userSignupSchema.parse(payload);
+  const email = input.email.trim().toLowerCase();
+  const passwordHash = await hash(input.password, 12);
+  const prisma = await getPrisma();
 
-  return (
-    passwordMatches &&
-    input.email.trim().toLowerCase() === credentials.email
-  );
+  try {
+    const user = await prisma.$transaction(async (tx) => {
+      const clinic = await tx.clinic.create({
+        data: {name: input.clinicName},
+      });
+      return tx.user.create({
+        data: {
+          email,
+          passwordHash,
+          name: input.name,
+          role: "OWNER",
+          clinicId: clinic.id,
+        },
+      });
+    });
+
+    return {
+      sub: user.id,
+      email: user.email,
+      clinicId: user.clinicId,
+      role: user.role,
+    };
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      throw new Error("EMAIL_TAKEN");
+    }
+    throw error;
+  }
 }
 
-export async function signAdminSession(): Promise<string> {
-  const { email } = getAdminCredentials();
+export async function signIn(payload: {
+  email: string;
+  password: string;
+}): Promise<UserSession | null> {
+  const input = userLoginSchema.parse(payload);
+  const email = input.email.trim().toLowerCase();
+  const prisma = await getPrisma();
+  const user = await prisma.user.findUnique({where: {email}});
+  if (!user) return null;
+  if (!await compare(input.password, user.passwordHash)) return null;
+  return {
+    sub: user.id,
+    email: user.email,
+    clinicId: user.clinicId,
+    role: user.role,
+  };
+}
+
+export async function signUserSession(session: UserSession): Promise<string> {
   const ttl = getSessionTtl();
 
-  return new SignJWT({ role: "admin", email })
-    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-    .setSubject("admin")
+  return new SignJWT({
+    email: session.email,
+    clinicId: session.clinicId,
+    role: session.role,
+  })
+    .setProtectedHeader({alg: "HS256", typ: "JWT"})
+    .setSubject(session.sub)
     .setIssuer(ISSUER)
     .setAudience(AUDIENCE)
     .setIssuedAt()
@@ -91,36 +131,35 @@ export async function signAdminSession(): Promise<string> {
     .sign(getAuthSecret());
 }
 
-export async function verifyAdminSession(
+export async function verifyUserSession(
   token: string | null | undefined,
-): Promise<AdminSession | null> {
+): Promise<UserSession | null> {
   if (!token) return null;
 
   try {
-    const { payload } = await jwtVerify(token, getAuthSecret(), {
+    const {payload} = await jwtVerify(token, getAuthSecret(), {
       algorithms: ["HS256"],
       issuer: ISSUER,
       audience: AUDIENCE,
-      subject: "admin",
     });
-    const credentials = getAdminCredentials();
     if (
-      payload.role !== "admin" ||
+      typeof payload.sub !== "string" ||
       typeof payload.email !== "string" ||
-      payload.email.toLowerCase() !== credentials.email
+      typeof payload.clinicId !== "string" ||
+      (payload.role !== "OWNER" && payload.role !== "MEMBER")
     ) {
       return null;
     }
-    return payload as AdminSession;
+    return payload as UserSession;
   } catch {
     return null;
   }
 }
 
-export async function createAdminSessionCookie(): Promise<SessionCookie> {
+export async function createSessionCookie(session: UserSession): Promise<SessionCookie> {
   return {
-    name: getAdminCookieName(),
-    value: await signAdminSession(),
+    name: getSessionCookieName(),
+    value: await signUserSession(session),
     options: {
       httpOnly: true,
       secure: isSecureCookie(),
@@ -131,9 +170,9 @@ export async function createAdminSessionCookie(): Promise<SessionCookie> {
   };
 }
 
-export function createExpiredAdminCookie(): SessionCookie {
+export function createExpiredSessionCookie(): SessionCookie {
   return {
-    name: getAdminCookieName(),
+    name: getSessionCookieName(),
     value: "",
     options: {
       httpOnly: true,
@@ -145,9 +184,9 @@ export function createExpiredAdminCookie(): SessionCookie {
   };
 }
 
-export function readAdminToken(cookieHeader: string | null): string | null {
+export function readSessionToken(cookieHeader: string | null): string | null {
   if (!cookieHeader) return null;
-  const target = getAdminCookieName();
+  const target = getSessionCookieName();
 
   for (const pair of cookieHeader.split(";")) {
     const separator = pair.indexOf("=");
@@ -164,13 +203,8 @@ export function readAdminToken(cookieHeader: string | null): string | null {
   return null;
 }
 
-export async function isAdminRequestAuthorized(request: Request): Promise<boolean> {
-  if (process.env.NODE_ENV === "development" && !process.env.ADMIN_EMAIL) {
-    return true;
-  }
-  return Boolean(
-    await verifyAdminSession(readAdminToken(request.headers.get("cookie"))),
-  );
+export async function requireSession(request: Request): Promise<UserSession | null> {
+  return verifyUserSession(readSessionToken(request.headers.get("cookie")));
 }
 
 export function serializeSessionCookie(cookie: SessionCookie): string {
@@ -184,4 +218,3 @@ export function serializeSessionCookie(cookie: SessionCookie): string {
   if (cookie.options.secure) parts.push("Secure");
   return parts.join("; ");
 }
-

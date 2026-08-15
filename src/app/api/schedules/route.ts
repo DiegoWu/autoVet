@@ -1,7 +1,7 @@
 import {NextResponse} from "next/server";
 import {z} from "zod";
 import {getPrisma} from "@/lib/db";
-import {isAdminRequestAuthorized} from "@/lib/auth";
+import {requireSession} from "@/lib/auth";
 import type {Prisma} from "@/generated/prisma/client";
 
 const SaveSchema = z.object({
@@ -133,11 +133,12 @@ const SaveSchema = z.object({
 });
 
 export async function GET(request: Request) {
-  if (!await isAdminRequestAuthorized(request)) return NextResponse.json({error: "Unauthorized"}, {status: 401});
+  const session = await requireSession(request);
+  if (!session) return NextResponse.json({error: "Unauthorized"}, {status: 401});
   try {
     const prisma = await getPrisma();
     const runs = await prisma.scheduleRun.findMany({
-      where: {clinicId: "default-clinic", status: "SELECTED"},
+      where: {clinicId: session.clinicId, status: "SELECTED"},
       orderBy: {createdAt: "desc"},
       include: {selected: {include: {assignments: {include: {employee: true}}}}},
       take: 60,
@@ -187,26 +188,19 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  if (!await isAdminRequestAuthorized(request)) return NextResponse.json({error: "Unauthorized"}, {status: 401});
+  const session = await requireSession(request);
+  if (!session) return NextResponse.json({error: "Unauthorized"}, {status: 401});
   const parsed = SaveSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({error: "Invalid schedule", issues: parsed.error.issues}, {status: 400});
 
   try {
     const input = parsed.data;
+    const clinicId = session.clinicId;
     const prisma = await getPrisma();
     const run = await prisma.$transaction(async (tx) => {
-      await tx.clinic.upsert({
-        where: {id: "default-clinic"},
-        update: {
-          minDoctors: input.config.minDoctors,
-          maxDoctors: input.config.maxDoctors,
-          minNurses: input.config.minNurses,
-          flexibleHoursMode: input.config.flex,
-          approvalAttested: input.config.attested,
-        },
-        create: {
-          id: "default-clinic",
-          name: "autoVet Clinic",
+      await tx.clinic.update({
+        where: {id: clinicId},
+        data: {
           minDoctors: input.config.minDoctors,
           maxDoctors: input.config.maxDoctors,
           minNurses: input.config.minNurses,
@@ -214,6 +208,13 @@ export async function POST(request: Request) {
           approvalAttested: input.config.attested,
         },
       });
+      const existingEmployees = await tx.employee.findMany({
+        where: {id: {in: input.staff.map((employee) => employee.id)}},
+        select: {clinicId: true},
+      });
+      if (existingEmployees.some((employee) => employee.clinicId !== clinicId)) {
+        throw new Error("EMPLOYEE_CLINIC_MISMATCH");
+      }
       for (const [sortOrder, employee] of input.staff.entries()) {
         await tx.employee.upsert({
           where: {id: employee.id},
@@ -229,7 +230,7 @@ export async function POST(request: Request) {
           },
           create: {
             id: employee.id,
-            clinicId: "default-clinic",
+            clinicId,
             name: employee.name,
             role: employee.role,
             backupOnly: employee.backupOnly,
@@ -243,7 +244,7 @@ export async function POST(request: Request) {
       }
       const created = await tx.scheduleRun.create({
         data: {
-          clinicId: "default-clinic",
+          clinicId,
           month: new Date(`${input.month}-01T00:00:00.000Z`),
           seed: 1,
           inputSnapshot: input as unknown as Prisma.InputJsonValue,
@@ -285,7 +286,10 @@ export async function POST(request: Request) {
       });
     });
     return NextResponse.json({id: run.id}, {status: 201});
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message === "EMPLOYEE_CLINIC_MISMATCH") {
+      return NextResponse.json({error: "Staff records must belong to the signed-in clinic"}, {status: 400});
+    }
     return NextResponse.json({error: "Database persistence is unavailable"}, {status: 503});
   }
 }

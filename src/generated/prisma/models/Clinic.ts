@@ -264,6 +264,7 @@ export type ClinicWhereInput = {
   approvalAttested?: Prisma.BoolFilter<"Clinic"> | boolean
   createdAt?: Prisma.DateTimeFilter<"Clinic"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"Clinic"> | Date | string
+  users?: Prisma.UserListRelationFilter
   employees?: Prisma.EmployeeListRelationFilter
   scheduleRuns?: Prisma.ScheduleRunListRelationFilter
 }
@@ -279,6 +280,7 @@ export type ClinicOrderByWithRelationInput = {
   approvalAttested?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
+  users?: Prisma.UserOrderByRelationAggregateInput
   employees?: Prisma.EmployeeOrderByRelationAggregateInput
   scheduleRuns?: Prisma.ScheduleRunOrderByRelationAggregateInput
 }
@@ -297,6 +299,7 @@ export type ClinicWhereUniqueInput = Prisma.AtLeast<{
   approvalAttested?: Prisma.BoolFilter<"Clinic"> | boolean
   createdAt?: Prisma.DateTimeFilter<"Clinic"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"Clinic"> | Date | string
+  users?: Prisma.UserListRelationFilter
   employees?: Prisma.EmployeeListRelationFilter
   scheduleRuns?: Prisma.ScheduleRunListRelationFilter
 }, "id">
@@ -346,6 +349,7 @@ export type ClinicCreateInput = {
   approvalAttested?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
+  users?: Prisma.UserCreateNestedManyWithoutClinicInput
   employees?: Prisma.EmployeeCreateNestedManyWithoutClinicInput
   scheduleRuns?: Prisma.ScheduleRunCreateNestedManyWithoutClinicInput
 }
@@ -361,6 +365,7 @@ export type ClinicUncheckedCreateInput = {
   approvalAttested?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
+  users?: Prisma.UserUncheckedCreateNestedManyWithoutClinicInput
   employees?: Prisma.EmployeeUncheckedCreateNestedManyWithoutClinicInput
   scheduleRuns?: Prisma.ScheduleRunUncheckedCreateNestedManyWithoutClinicInput
 }
@@ -376,6 +381,7 @@ export type ClinicUpdateInput = {
   approvalAttested?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  users?: Prisma.UserUpdateManyWithoutClinicNestedInput
   employees?: Prisma.EmployeeUpdateManyWithoutClinicNestedInput
   scheduleRuns?: Prisma.ScheduleRunUpdateManyWithoutClinicNestedInput
 }
@@ -391,6 +397,7 @@ export type ClinicUncheckedUpdateInput = {
   approvalAttested?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  users?: Prisma.UserUncheckedUpdateManyWithoutClinicNestedInput
   employees?: Prisma.EmployeeUncheckedUpdateManyWithoutClinicNestedInput
   scheduleRuns?: Prisma.ScheduleRunUncheckedUpdateManyWithoutClinicNestedInput
 }
@@ -510,6 +517,20 @@ export type DateTimeFieldUpdateOperationsInput = {
   set?: Date | string
 }
 
+export type ClinicCreateNestedOneWithoutUsersInput = {
+  create?: Prisma.XOR<Prisma.ClinicCreateWithoutUsersInput, Prisma.ClinicUncheckedCreateWithoutUsersInput>
+  connectOrCreate?: Prisma.ClinicCreateOrConnectWithoutUsersInput
+  connect?: Prisma.ClinicWhereUniqueInput
+}
+
+export type ClinicUpdateOneRequiredWithoutUsersNestedInput = {
+  create?: Prisma.XOR<Prisma.ClinicCreateWithoutUsersInput, Prisma.ClinicUncheckedCreateWithoutUsersInput>
+  connectOrCreate?: Prisma.ClinicCreateOrConnectWithoutUsersInput
+  upsert?: Prisma.ClinicUpsertWithoutUsersInput
+  connect?: Prisma.ClinicWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.ClinicUpdateToOneWithWhereWithoutUsersInput, Prisma.ClinicUpdateWithoutUsersInput>, Prisma.ClinicUncheckedUpdateWithoutUsersInput>
+}
+
 export type ClinicCreateNestedOneWithoutEmployeesInput = {
   create?: Prisma.XOR<Prisma.ClinicCreateWithoutEmployeesInput, Prisma.ClinicUncheckedCreateWithoutEmployeesInput>
   connectOrCreate?: Prisma.ClinicCreateOrConnectWithoutEmployeesInput
@@ -538,6 +559,82 @@ export type ClinicUpdateOneRequiredWithoutScheduleRunsNestedInput = {
   update?: Prisma.XOR<Prisma.XOR<Prisma.ClinicUpdateToOneWithWhereWithoutScheduleRunsInput, Prisma.ClinicUpdateWithoutScheduleRunsInput>, Prisma.ClinicUncheckedUpdateWithoutScheduleRunsInput>
 }
 
+export type ClinicCreateWithoutUsersInput = {
+  id?: string
+  name: string
+  defaultLocale?: string
+  minDoctors?: number
+  maxDoctors?: number
+  minNurses?: number
+  flexibleHoursMode?: boolean
+  approvalAttested?: boolean
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  employees?: Prisma.EmployeeCreateNestedManyWithoutClinicInput
+  scheduleRuns?: Prisma.ScheduleRunCreateNestedManyWithoutClinicInput
+}
+
+export type ClinicUncheckedCreateWithoutUsersInput = {
+  id?: string
+  name: string
+  defaultLocale?: string
+  minDoctors?: number
+  maxDoctors?: number
+  minNurses?: number
+  flexibleHoursMode?: boolean
+  approvalAttested?: boolean
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  employees?: Prisma.EmployeeUncheckedCreateNestedManyWithoutClinicInput
+  scheduleRuns?: Prisma.ScheduleRunUncheckedCreateNestedManyWithoutClinicInput
+}
+
+export type ClinicCreateOrConnectWithoutUsersInput = {
+  where: Prisma.ClinicWhereUniqueInput
+  create: Prisma.XOR<Prisma.ClinicCreateWithoutUsersInput, Prisma.ClinicUncheckedCreateWithoutUsersInput>
+}
+
+export type ClinicUpsertWithoutUsersInput = {
+  update: Prisma.XOR<Prisma.ClinicUpdateWithoutUsersInput, Prisma.ClinicUncheckedUpdateWithoutUsersInput>
+  create: Prisma.XOR<Prisma.ClinicCreateWithoutUsersInput, Prisma.ClinicUncheckedCreateWithoutUsersInput>
+  where?: Prisma.ClinicWhereInput
+}
+
+export type ClinicUpdateToOneWithWhereWithoutUsersInput = {
+  where?: Prisma.ClinicWhereInput
+  data: Prisma.XOR<Prisma.ClinicUpdateWithoutUsersInput, Prisma.ClinicUncheckedUpdateWithoutUsersInput>
+}
+
+export type ClinicUpdateWithoutUsersInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  defaultLocale?: Prisma.StringFieldUpdateOperationsInput | string
+  minDoctors?: Prisma.IntFieldUpdateOperationsInput | number
+  maxDoctors?: Prisma.IntFieldUpdateOperationsInput | number
+  minNurses?: Prisma.IntFieldUpdateOperationsInput | number
+  flexibleHoursMode?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  approvalAttested?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  employees?: Prisma.EmployeeUpdateManyWithoutClinicNestedInput
+  scheduleRuns?: Prisma.ScheduleRunUpdateManyWithoutClinicNestedInput
+}
+
+export type ClinicUncheckedUpdateWithoutUsersInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  defaultLocale?: Prisma.StringFieldUpdateOperationsInput | string
+  minDoctors?: Prisma.IntFieldUpdateOperationsInput | number
+  maxDoctors?: Prisma.IntFieldUpdateOperationsInput | number
+  minNurses?: Prisma.IntFieldUpdateOperationsInput | number
+  flexibleHoursMode?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  approvalAttested?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  employees?: Prisma.EmployeeUncheckedUpdateManyWithoutClinicNestedInput
+  scheduleRuns?: Prisma.ScheduleRunUncheckedUpdateManyWithoutClinicNestedInput
+}
+
 export type ClinicCreateWithoutEmployeesInput = {
   id?: string
   name: string
@@ -549,6 +646,7 @@ export type ClinicCreateWithoutEmployeesInput = {
   approvalAttested?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
+  users?: Prisma.UserCreateNestedManyWithoutClinicInput
   scheduleRuns?: Prisma.ScheduleRunCreateNestedManyWithoutClinicInput
 }
 
@@ -563,6 +661,7 @@ export type ClinicUncheckedCreateWithoutEmployeesInput = {
   approvalAttested?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
+  users?: Prisma.UserUncheckedCreateNestedManyWithoutClinicInput
   scheduleRuns?: Prisma.ScheduleRunUncheckedCreateNestedManyWithoutClinicInput
 }
 
@@ -593,6 +692,7 @@ export type ClinicUpdateWithoutEmployeesInput = {
   approvalAttested?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  users?: Prisma.UserUpdateManyWithoutClinicNestedInput
   scheduleRuns?: Prisma.ScheduleRunUpdateManyWithoutClinicNestedInput
 }
 
@@ -607,6 +707,7 @@ export type ClinicUncheckedUpdateWithoutEmployeesInput = {
   approvalAttested?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  users?: Prisma.UserUncheckedUpdateManyWithoutClinicNestedInput
   scheduleRuns?: Prisma.ScheduleRunUncheckedUpdateManyWithoutClinicNestedInput
 }
 
@@ -621,6 +722,7 @@ export type ClinicCreateWithoutScheduleRunsInput = {
   approvalAttested?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
+  users?: Prisma.UserCreateNestedManyWithoutClinicInput
   employees?: Prisma.EmployeeCreateNestedManyWithoutClinicInput
 }
 
@@ -635,6 +737,7 @@ export type ClinicUncheckedCreateWithoutScheduleRunsInput = {
   approvalAttested?: boolean
   createdAt?: Date | string
   updatedAt?: Date | string
+  users?: Prisma.UserUncheckedCreateNestedManyWithoutClinicInput
   employees?: Prisma.EmployeeUncheckedCreateNestedManyWithoutClinicInput
 }
 
@@ -665,6 +768,7 @@ export type ClinicUpdateWithoutScheduleRunsInput = {
   approvalAttested?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  users?: Prisma.UserUpdateManyWithoutClinicNestedInput
   employees?: Prisma.EmployeeUpdateManyWithoutClinicNestedInput
 }
 
@@ -679,6 +783,7 @@ export type ClinicUncheckedUpdateWithoutScheduleRunsInput = {
   approvalAttested?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  users?: Prisma.UserUncheckedUpdateManyWithoutClinicNestedInput
   employees?: Prisma.EmployeeUncheckedUpdateManyWithoutClinicNestedInput
 }
 
@@ -688,11 +793,13 @@ export type ClinicUncheckedUpdateWithoutScheduleRunsInput = {
  */
 
 export type ClinicCountOutputType = {
+  users: number
   employees: number
   scheduleRuns: number
 }
 
 export type ClinicCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  users?: boolean | ClinicCountOutputTypeCountUsersArgs
   employees?: boolean | ClinicCountOutputTypeCountEmployeesArgs
   scheduleRuns?: boolean | ClinicCountOutputTypeCountScheduleRunsArgs
 }
@@ -705,6 +812,13 @@ export type ClinicCountOutputTypeDefaultArgs<ExtArgs extends runtime.Types.Exten
    * Select specific fields to fetch from the ClinicCountOutputType
    */
   select?: Prisma.ClinicCountOutputTypeSelect<ExtArgs> | null
+}
+
+/**
+ * ClinicCountOutputType without action
+ */
+export type ClinicCountOutputTypeCountUsersArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.UserWhereInput
 }
 
 /**
@@ -733,6 +847,7 @@ export type ClinicSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs =
   approvalAttested?: boolean
   createdAt?: boolean
   updatedAt?: boolean
+  users?: boolean | Prisma.Clinic$usersArgs<ExtArgs>
   employees?: boolean | Prisma.Clinic$employeesArgs<ExtArgs>
   scheduleRuns?: boolean | Prisma.Clinic$scheduleRunsArgs<ExtArgs>
   _count?: boolean | Prisma.ClinicCountOutputTypeDefaultArgs<ExtArgs>
@@ -779,6 +894,7 @@ export type ClinicSelectScalar = {
 
 export type ClinicOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "name" | "defaultLocale" | "minDoctors" | "maxDoctors" | "minNurses" | "flexibleHoursMode" | "approvalAttested" | "createdAt" | "updatedAt", ExtArgs["result"]["clinic"]>
 export type ClinicInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  users?: boolean | Prisma.Clinic$usersArgs<ExtArgs>
   employees?: boolean | Prisma.Clinic$employeesArgs<ExtArgs>
   scheduleRuns?: boolean | Prisma.Clinic$scheduleRunsArgs<ExtArgs>
   _count?: boolean | Prisma.ClinicCountOutputTypeDefaultArgs<ExtArgs>
@@ -789,6 +905,7 @@ export type ClinicIncludeUpdateManyAndReturn<ExtArgs extends runtime.Types.Exten
 export type $ClinicPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "Clinic"
   objects: {
+    users: Prisma.$UserPayload<ExtArgs>[]
     employees: Prisma.$EmployeePayload<ExtArgs>[]
     scheduleRuns: Prisma.$ScheduleRunPayload<ExtArgs>[]
   }
@@ -1197,6 +1314,7 @@ readonly fields: ClinicFieldRefs;
  */
 export interface Prisma__ClinicClient<T, Null = never, ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs, GlobalOmitOptions = {}> extends Prisma.PrismaPromise<T> {
   readonly [Symbol.toStringTag]: "PrismaPromise"
+  users<T extends Prisma.Clinic$usersArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Clinic$usersArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$UserPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   employees<T extends Prisma.Clinic$employeesArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Clinic$employeesArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$EmployeePayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   scheduleRuns<T extends Prisma.Clinic$scheduleRunsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Clinic$scheduleRunsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$ScheduleRunPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   /**
@@ -1628,6 +1746,30 @@ export type ClinicDeleteManyArgs<ExtArgs extends runtime.Types.Extensions.Intern
    * Limit how many Clinics to delete.
    */
   limit?: number
+}
+
+/**
+ * Clinic.users
+ */
+export type Clinic$usersArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the User
+   */
+  select?: Prisma.UserSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the User
+   */
+  omit?: Prisma.UserOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.UserInclude<ExtArgs> | null
+  where?: Prisma.UserWhereInput
+  orderBy?: Prisma.UserOrderByWithRelationInput | Prisma.UserOrderByWithRelationInput[]
+  cursor?: Prisma.UserWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.UserScalarFieldEnum | Prisma.UserScalarFieldEnum[]
 }
 
 /**

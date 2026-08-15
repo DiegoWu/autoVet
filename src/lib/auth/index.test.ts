@@ -1,26 +1,44 @@
 import {afterEach, describe, expect, it, vi} from "vitest";
-import {isAdminRequestAuthorized, readAdminToken} from "./index";
+import {
+  readSessionToken,
+  requireSession,
+  signUserSession,
+  verifyUserSession,
+} from "./index";
 
 afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("API authorization", () => {
-  it("rejects a production request without an admin session", async () => {
+const session = {
+  sub: "user_1",
+  email: "owner@clinic.example",
+  clinicId: "clinic_1",
+  role: "OWNER" as const,
+};
+
+describe("user sessions", () => {
+  it("rejects a request without a session cookie", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("ADMIN_EMAIL", "admin@example.com");
     vi.stubEnv("AUTH_SECRET", "a".repeat(32));
 
     await expect(
-      isAdminRequestAuthorized(new Request("https://example.com/api/summary")),
-    ).resolves.toBe(false);
+      requireSession(new Request("https://example.com/api/summary")),
+    ).resolves.toBeNull();
   });
 
-  it("reads the configured admin cookie from a request header", () => {
+  it("reads the configured session cookie from a request header", () => {
     vi.stubEnv("AUTH_COOKIE_NAME", "autovet_session");
 
     expect(
-      readAdminToken("other=value; autovet_session=signed%20token"),
+      readSessionToken("other=value; autovet_session=signed%20token"),
     ).toBe("signed token");
+  });
+
+  it("round-trips a clinic-scoped user session", async () => {
+    vi.stubEnv("AUTH_SECRET", "a".repeat(32));
+
+    const token = await signUserSession(session);
+    await expect(verifyUserSession(token)).resolves.toMatchObject(session);
   });
 });

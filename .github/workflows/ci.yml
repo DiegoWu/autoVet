@@ -19,8 +19,6 @@ jobs:
     env:
       DATABASE_URL: postgresql://build:build@localhost:5432/autovet
       AUTH_SECRET: ci-only-auth-secret-not-used-in-production
-      ADMIN_EMAIL: admin@example.invalid
-      ADMIN_PASSWORD_HASH: '$2b$12$000000000000000000000uHnC1JbMZQyG2f5xH0kXQvQj1oZg6u'
       NEXT_TELEMETRY_DISABLED: 1
     steps:
       - name: Check out source

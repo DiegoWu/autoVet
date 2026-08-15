@@ -21,7 +21,7 @@ Start the application inside the Dev Container:
 npm run dev -- --hostname 0.0.0.0
 ```
 
-Open the forwarded port 3000. Local administrator authentication and OpenAI integration are disabled by default; PostgreSQL is available only through the internal `db:5432` Compose hostname.
+Open the forwarded port 3000. Sign up a clinic owner in the UI to start. OpenAI integration is disabled by default; PostgreSQL is available only through the internal `db:5432` Compose hostname.
 
 Useful commands inside the container:
 
@@ -70,7 +70,7 @@ cp .env.docker.example .env.docker
 openssl rand -base64 48
 ```
 
-Put the generated value in `AUTH_SECRET`, choose a strong URL-safe `POSTGRES_PASSWORD`, and replace the administrator email and password hash. Keep bcrypt hashes containing `$` inside single quotes in `.env.docker`. `OPENAI_API_KEY` is optional.
+Put the generated value in `AUTH_SECRET` and choose a strong URL-safe `POSTGRES_PASSWORD`. After the stack is up, create the first clinic owner in the sign-up page. `OPENAI_API_KEY` is optional.
 
 The previously exposed OpenAI key must be revoked and replaced; never reuse a key copied from chat, shell history, or repository history.
 
@@ -123,7 +123,7 @@ Changing `POSTGRES_USER`, `POSTGRES_PASSWORD`, or `POSTGRES_DB` after the volume
 - Manual same-role assignment cycling with immediate leave warnings
 - PDF, PNG, and JPG exports based on a dedicated print layout
 - Optional, server-only OpenAI preference summaries; AI never creates assignments
-- Signed, HTTP-only single-administrator sessions
+- Signed, HTTP-only clinic-owner sessions scoped to the clinic created at sign-up
 - Optional employee cards with experience, expertise, hobbies, and clearly labeled AI scores
 
 ## Local setup
@@ -139,13 +139,7 @@ npm run db:seed
 npm run dev
 ```
 
-Create the administrator password hash without storing a plain-text password:
-
-```bash
-node -e "import('bcryptjs').then(({hash}) => hash(process.argv[1], 12).then(console.log))" 'your-password'
-```
-
-Put the output in `ADMIN_PASSWORD_HASH`. `AUTH_SECRET` must contain at least 32 random bytes. `OPENAI_API_KEY` is optional.
+`AUTH_SECRET` must contain at least 32 random bytes. Create the first clinic owner in the sign-up page; do not store a shared administrator password in environment variables. `OPENAI_API_KEY` is optional.
 
 The UI keeps a local browser fallback so the workflow and exports remain usable during local UI development without PostgreSQL. Production persistence requires `DATABASE_URL`.
 

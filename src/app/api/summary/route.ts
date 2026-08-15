@@ -1,7 +1,7 @@
 import {NextResponse} from "next/server";
 import {z} from "zod";
 import {summarizeSelectedSchedule} from "@/lib/ai/preference-summary";
-import {isAdminRequestAuthorized} from "@/lib/auth";
+import {requireSession} from "@/lib/auth";
 
 const RequestSchema = z.object({
   locale: z.enum(["zh-TW", "en"]).default("zh-TW"),
@@ -10,7 +10,7 @@ const RequestSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  if (!await isAdminRequestAuthorized(request)) {
+  if (!await requireSession(request)) {
     return NextResponse.json({error: "Unauthorized"}, {status: 401});
   }
   const parsed = RequestSchema.safeParse(await request.json());
