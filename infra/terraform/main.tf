@@ -71,6 +71,8 @@ locals {
   github_main_subject        = "repo:${var.github_repository}:ref:refs/heads/main"
   github_environment_subject = "repo:${var.github_repository}:environment:${var.github_environment}"
   wif_principal_prefix       = "principal://iam.googleapis.com/projects/${var.project_number}/locations/global/workloadIdentityPools/${google_iam_workload_identity_pool.github.workload_identity_pool_id}/subject"
+  wif_principal_set_prefix   = "principalSet://iam.googleapis.com/projects/${var.project_number}/locations/global/workloadIdentityPools/${google_iam_workload_identity_pool.github.workload_identity_pool_id}"
+  wif_principal_set_main_ref = "${local.wif_principal_set_prefix}/attribute.ref/refs/heads/main"
 }
 
 resource "google_project_service" "required" {
@@ -282,7 +284,7 @@ resource "google_service_account_iam_member" "github_deployer_self_token" {
 resource "google_service_account_iam_member" "github_deployer_wif_token" {
   service_account_id = google_service_account.app["github_deployer"].name
   role               = "roles/iam.serviceAccountTokenCreator"
-  member             = "${local.wif_principal_prefix}/${local.github_main_subject}"
+  member             = local.wif_principal_set_main_ref
 }
 
 resource "google_project_iam_member" "terraform_provisioner" {
@@ -355,7 +357,7 @@ resource "google_iam_workload_identity_pool_provider" "github_environment" {
 resource "google_service_account_iam_member" "github_main_wif" {
   service_account_id = google_service_account.app["github_deployer"].name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "${local.wif_principal_prefix}/${local.github_main_subject}"
+  member             = local.wif_principal_set_main_ref
 }
 
 resource "google_service_account_iam_member" "github_environment_wif" {
