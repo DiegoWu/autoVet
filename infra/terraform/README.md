@@ -64,7 +64,7 @@ Cloud Run validates referenced Secret Manager versions while creating a revision
    - sets the PostgreSQL administrator, runtime, and migration passwords through the Cloud SQL Admin API;
    - connects through Cloud SQL Auth Proxy and applies database grants;
    - builds Unix-socket database URLs locally;
-   - adds one version to each of the six Secret Manager containers.
+   - adds one version to the Secret Manager containers Cloud Run still consumes (`database-url-runtime`, `database-url-migration`, `auth-secret`, and `openai-api-key`). Unused `admin-email` and `admin-password-hash` containers may remain from earlier deploys.
 
    Inputs are read without terminal echo. They are not passed to Terraform or written to files. `gcloud sql users set-password` necessarily receives each database password as a process argument for the duration of that command, so run the script only on a trusted workstation. The PostgreSQL administrator password is not stored by the module; retain it securely or reset it with the Cloud SQL Admin API when needed.
 

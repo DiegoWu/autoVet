@@ -127,8 +127,6 @@ variable "secret_versions" {
   description = "Pinned Secret Manager versions deployed to Cloud Run. Increment entries explicitly during rotation."
   type        = map(string)
   default = {
-    admin-email            = "1"
-    admin-password-hash    = "1"
     auth-secret            = "1"
     database-url-migration = "1"
     database-url-runtime   = "1"
@@ -138,8 +136,6 @@ variable "secret_versions" {
   validation {
     condition = alltrue([
       for secret_id in [
-        "admin-email",
-        "admin-password-hash",
         "auth-secret",
         "database-url-migration",
         "database-url-runtime",

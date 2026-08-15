@@ -22,8 +22,6 @@ app_max_instances = 3
 scheduler_timezone = "Asia/Taipei"
 
 secret_versions = {
-  admin-email            = "1"
-  admin-password-hash    = "1"
   auth-secret            = "1"
   database-url-migration = "1"
   database-url-runtime   = "1"

@@ -75,8 +75,6 @@ echo "Secrets are read without echo and are never passed to Terraform."
 POSTGRES_PASSWORD="$(read_required_secret "Temporary Cloud SQL postgres administrator password")"
 RUNTIME_PASSWORD="$(read_required_secret "Runtime database password")"
 MIGRATION_PASSWORD="$(read_required_secret "Migration database password")"
-ADMIN_EMAIL="$(read_required_secret "Application administrator email")"
-ADMIN_PASSWORD_HASH="$(read_required_secret "Precomputed bcrypt administrator password hash")"
 read -r -s -p "OpenAI API key (optional): " OPENAI_API_KEY
 echo
 
@@ -168,8 +166,6 @@ echo "Creating Secret Manager versions..."
 add_secret_version "database-url-runtime" "${RUNTIME_DATABASE_URL}"
 add_secret_version "database-url-migration" "${MIGRATION_DATABASE_URL}"
 add_secret_version "auth-secret" "${AUTH_SECRET}"
-add_secret_version "admin-email" "${ADMIN_EMAIL}"
-add_secret_version "admin-password-hash" "${ADMIN_PASSWORD_HASH}"
 add_secret_version "openai-api-key" "${OPENAI_API_KEY}"
 
 echo "Bootstrap complete. Run a normal terraform apply to create Cloud Run resources."

@@ -51,8 +51,6 @@ locals {
   app_secret_ids = toset([
     "database-url-runtime",
     "auth-secret",
-    "admin-email",
-    "admin-password-hash",
     "openai-api-key",
   ])
 
@@ -68,9 +66,9 @@ locals {
     "roles/serviceusage.serviceUsageAdmin",
   ])
 
-  github_main_subject        = "repo:${var.github_repository}:ref:refs/heads/main"
-  github_environment_subject = "repo:${var.github_repository}:environment:${var.github_environment}"
-  wif_principal_prefix       = "principal://iam.googleapis.com/projects/${var.project_number}/locations/global/workloadIdentityPools/${google_iam_workload_identity_pool.github.workload_identity_pool_id}/subject"
+  github_main_subject           = "repo:${var.github_repository}:ref:refs/heads/main"
+  github_environment_subject    = "repo:${var.github_repository}:environment:${var.github_environment}"
+  wif_principal_prefix          = "principal://iam.googleapis.com/projects/${var.project_number}/locations/global/workloadIdentityPools/${google_iam_workload_identity_pool.github.workload_identity_pool_id}/subject"
   wif_principal_set_prefix      = "principalSet://iam.googleapis.com/projects/${var.project_number}/locations/global/workloadIdentityPools/${google_iam_workload_identity_pool.github.workload_identity_pool_id}"
   wif_principal_set_main_ref    = "${local.wif_principal_set_prefix}/attribute.ref/refs/heads/main"
   wif_principal_set_environment = "${local.wif_principal_set_prefix}/attribute.environment/${var.github_environment}"
@@ -460,26 +458,6 @@ resource "google_cloud_run_v2_service" "app" {
           secret_key_ref {
             secret  = google_secret_manager_secret.app["auth-secret"].secret_id
             version = var.secret_versions["auth-secret"]
-          }
-        }
-      }
-
-      env {
-        name = "ADMIN_EMAIL"
-        value_source {
-          secret_key_ref {
-            secret  = google_secret_manager_secret.app["admin-email"].secret_id
-            version = var.secret_versions["admin-email"]
-          }
-        }
-      }
-
-      env {
-        name = "ADMIN_PASSWORD_HASH"
-        value_source {
-          secret_key_ref {
-            secret  = google_secret_manager_secret.app["admin-password-hash"].secret_id
-            version = var.secret_versions["admin-password-hash"]
           }
         }
       }
