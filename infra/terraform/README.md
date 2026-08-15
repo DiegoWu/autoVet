@@ -7,7 +7,7 @@ This directory provisions the Google Cloud baseline for `DiegoWu/autoVet`:
 - Secret Manager containers only—Terraform never creates secret versions;
 - dedicated service accounts and scoped IAM for the application, migrations, Scheduler, GitHub Actions, and Terraform;
 - GitHub Workload Identity Federation for the exact repository, with separate main-branch deployment and protected-environment migration identities;
-- a public Cloud Run v2 service, a separately invokable migration job, and an authenticated five-minute Scheduler ping.
+- a public Cloud Run v2 service with configurable CPU and concurrency utilization targets (Preview scaling controls), a separately invokable migration job, and an authenticated five-minute Scheduler ping.
 
 ## Prerequisites
 

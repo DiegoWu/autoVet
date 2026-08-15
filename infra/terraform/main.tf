@@ -395,12 +395,21 @@ resource "google_service_account_iam_member" "terraform_environment_wif" {
   member             = local.wif_principal_set_environment
 }
 
+check "cloud_run_scaling_driver" {
+  assert {
+    condition     = var.app_cpu_utilization != 0 || var.app_concurrency_utilization != 0
+    error_message = "CPU and concurrency utilization cannot both be disabled."
+  }
+}
+
 resource "google_cloud_run_v2_service" "app" {
+  provider            = google-beta
   project             = var.project_id
   name                = "${var.resource_prefix}-app"
   location            = var.region
   deletion_protection = false
   ingress             = "INGRESS_TRAFFIC_ALL"
+  launch_stage        = "BETA"
 
   template {
     service_account                  = google_service_account.app["app_runtime"].email
@@ -408,8 +417,10 @@ resource "google_cloud_run_v2_service" "app" {
     timeout                          = "300s"
 
     scaling {
-      min_instance_count = 0
-      max_instance_count = var.app_max_instances
+      min_instance_count      = 0
+      max_instance_count      = var.app_max_instances
+      cpu_utilization         = var.app_cpu_utilization
+      concurrency_utilization = var.app_concurrency_utilization
     }
 
     volumes {

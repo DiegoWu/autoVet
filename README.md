@@ -158,7 +158,7 @@ Scheduler tests cover deterministic output, seed diversity, hard coverage, time 
 
 The production baseline in `infra/terraform` targets Google Cloud project `autovet` (`647145801184`) in `asia-east1`. It provisions Artifact Registry, Cloud Run, a separate migration job, Cloud SQL PostgreSQL, Secret Manager, Cloud Scheduler, and keyless GitHub Workload Identity Federation.
 
-Cloud Run uses zero minimum instances and a maximum of three. Scheduler sends an authenticated health request every five minutes to reduce cold starts. This is best-effort only: Cloud Run can still remove an idle instance, and guaranteed warm capacity requires setting the minimum to one.
+Cloud Run uses zero minimum instances and a maximum of three. Autoscaling targets default to 60% CPU and 60% concurrency utilization (`app_cpu_utilization` and `app_concurrency_utilization` in `infra/terraform/terraform.tfvars`). Scheduler sends an authenticated health request every five minutes to reduce cold starts. This is best-effort only: Cloud Run can still remove an idle instance, and guaranteed warm capacity requires setting the minimum to one.
 
 ### One-time bootstrap
 

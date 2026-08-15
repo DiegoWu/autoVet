@@ -14,10 +14,12 @@ database_tier                = "db-f1-micro"
 database_disk_size_gb        = 20
 database_deletion_protection = true
 
-app_cpu           = "2"
-app_memory        = "1Gi"
-app_concurrency   = 4
-app_max_instances = 3
+app_cpu                      = "2"
+app_memory                   = "1Gi"
+app_concurrency              = 4
+app_max_instances            = 3
+app_cpu_utilization          = 0.6
+app_concurrency_utilization  = 0.6
 
 scheduler_timezone = "Asia/Taipei"
 

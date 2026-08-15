@@ -117,6 +117,28 @@ variable "app_max_instances" {
   default     = 3
 }
 
+variable "app_cpu_utilization" {
+  description = "Cloud Run CPU utilization target before scaling out. Use 0.1–0.95, or 0 to disable CPU-based scaling. Preview scaling-controls field."
+  type        = number
+  default     = 0.6
+
+  validation {
+    condition     = var.app_cpu_utilization == 0 || (var.app_cpu_utilization >= 0.1 && var.app_cpu_utilization <= 0.95)
+    error_message = "app_cpu_utilization must be 0 (disabled) or between 0.1 and 0.95."
+  }
+}
+
+variable "app_concurrency_utilization" {
+  description = "Cloud Run concurrency utilization target before scaling out. Use 0.1–0.95, or 0 to disable concurrency-based scaling. Preview scaling-controls field."
+  type        = number
+  default     = 0.6
+
+  validation {
+    condition     = var.app_concurrency_utilization == 0 || (var.app_concurrency_utilization >= 0.1 && var.app_concurrency_utilization <= 0.95)
+    error_message = "app_concurrency_utilization must be 0 (disabled) or between 0.1 and 0.95."
+  }
+}
+
 variable "scheduler_timezone" {
   description = "Timezone used by the five-minute keepalive schedule."
   type        = string
