@@ -165,6 +165,7 @@ jobs:
         with:
           workload_identity_provider: ${{ env.ENVIRONMENT_WIF_PROVIDER }}
           service_account: ${{ env.MIGRATION_EXECUTOR_SERVICE_ACCOUNT }}
+          token_format: access_token
 
       - name: Set up Google Cloud CLI
         uses: google-github-actions/setup-gcloud@v3
