@@ -144,6 +144,7 @@
     "doctor": "Doctor",
     "nurse": "Nurse",
     "doctorColors": "Doctor colors:",
+    "staffColors": "Staff colors:",
     "highlightHint": "Click to highlight every shift for this person.",
     "replaceHint": "Double-click to replace this person.",
     "weeklyHours": "{name}: {hours} hours this week",

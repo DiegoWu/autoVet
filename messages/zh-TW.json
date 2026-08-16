@@ -144,6 +144,7 @@
     "doctor": "醫師",
     "nurse": "護理師",
     "doctorColors": "醫師色彩：",
+    "staffColors": "成員色彩：",
     "highlightHint": "點擊即可醒目顯示此人的所有班次。",
     "replaceHint": "連按兩下即可更換此人。",
     "weeklyHours": "{name}：本週 {hours} 小時",

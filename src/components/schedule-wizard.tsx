@@ -204,13 +204,14 @@ export function ScheduleWizard() {
     ),
     [preferences, scheduleStaffIds],
   );
-  const doctorColors = useMemo(() => {
+  const staffColors = useMemo(() => {
     const colors = new Map<string, {backgroundColor: string; borderColor: string; color: string}>();
-    scheduleStaff
-      .filter((employee) => employee.role === "DOCTOR")
-      .sort((left, right) => left.id.localeCompare(right.id))
-      .forEach((employee, index) => {
-        const hue = Math.round((index * 137.508 + 18) % 360);
+    const indexByRole = {DOCTOR: 0, NURSE: 0};
+    [...scheduleStaff]
+      .sort((left, right) => left.role.localeCompare(right.role) || left.id.localeCompare(right.id))
+      .forEach((employee) => {
+        const index = indexByRole[employee.role]++;
+        const hue = Math.round((index * 137.508 + (employee.role === "NURSE" ? 200 : 18)) % 360);
         colors.set(employee.id, {
           backgroundColor: `hsl(${hue} 70% 88%)`,
           borderColor: `hsl(${hue} 52% 64%)`,
@@ -1553,7 +1554,7 @@ export function ScheduleWizard() {
                   candidate={previewed}
                   month={month}
                   sundayMode={sundayMode}
-                  doctorColors={doctorColors}
+                  staffColors={staffColors}
                   highlightedEmployeeId={highlightedEmployeeId}
                   onHighlight={setHighlightedEmployeeId}
                 />
@@ -1595,7 +1596,7 @@ export function ScheduleWizard() {
               candidate={selected}
               month={month}
               sundayMode={sundayMode}
-              doctorColors={doctorColors}
+              staffColors={staffColors}
               highlightedEmployeeId={highlightedEmployeeId}
               onHighlight={setHighlightedEmployeeId}
               onCycle={cycleAssignment}
@@ -1639,7 +1640,7 @@ function ScheduleGrid({
   candidate,
   month,
   sundayMode,
-  doctorColors,
+  staffColors,
   highlightedEmployeeId,
   onHighlight,
   onCycle,
@@ -1652,7 +1653,7 @@ function ScheduleGrid({
   candidate: Candidate;
   month: string;
   sundayMode: SundayMode;
-  doctorColors: Map<string, {backgroundColor: string; borderColor: string; color: string}>;
+  staffColors: Map<string, {backgroundColor: string; borderColor: string; color: string}>;
   highlightedEmployeeId: string | null;
   onHighlight: (employeeId: string) => void;
   onCycle?: (date: string, session: Session, employeeId: string) => void;
@@ -1677,51 +1678,53 @@ function ScheduleGrid({
     for (let index = 0; index < dates.length; index += 7) chunks.push(dates.slice(index, index + 7));
     return chunks;
   }, [month]);
-  const scheduledDoctors = useMemo(() => {
-    const doctors = new Map<string, Employee>();
+  const scheduledStaff = useMemo(() => {
+    const people = new Map<string, Employee>();
     for (const assignment of candidate.assignments) {
       for (const employee of assignment.employees) {
-        if (employee.role === "DOCTOR") doctors.set(employee.id, employee);
+        people.set(employee.id, employee);
       }
     }
-    return [...doctors.values()].sort((left, right) => left.name.localeCompare(right.name, locale));
+    return [...people.values()].sort((left, right) =>
+      left.role.localeCompare(right.role) || left.name.localeCompare(right.name, locale),
+    );
   }, [candidate.assignments, locale]);
-  const highlightedDoctor = scheduledDoctors.find(
-    (doctor) => doctor.id === highlightedEmployeeId,
+  const highlightedEmployee = scheduledStaff.find(
+    (employee) => employee.id === highlightedEmployeeId,
   );
 
   return (
     <div className="schedule-wrap">
-      <div aria-label={t("doctorColors")} style={{display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", marginBottom: 12}}>
-        <strong style={{fontSize: 12, color: "var(--muted)", marginRight: 2}}>{t("doctorColors")}</strong>
-        {scheduledDoctors.map((doctor) => (
+      <div aria-label={t("staffColors")} style={{display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", marginBottom: 12}}>
+        <strong style={{fontSize: 12, color: "var(--muted)", marginRight: 2}}>{t("staffColors")}</strong>
+        {scheduledStaff.map((employee) => (
           <button
             type="button"
             className="assignment"
-            aria-pressed={highlightedEmployeeId === doctor.id}
+            aria-pressed={highlightedEmployeeId === employee.id}
             title={t("highlightHint")}
-            onClick={() => onHighlight(doctor.id)}
-            key={doctor.id}
+            onClick={() => onHighlight(employee.id)}
+            key={employee.id}
             style={{
-              ...doctorColors.get(doctor.id),
+              ...staffColors.get(employee.id),
               borderStyle: "solid",
               borderWidth: 1,
               paddingInline: 8,
-              boxShadow: highlightedEmployeeId === doctor.id ? "0 0 0 3px var(--sage-deep)" : undefined,
+              boxShadow: highlightedEmployeeId === employee.id ? "0 0 0 3px var(--sage-deep)" : undefined,
             }}
           >
-            {doctor.name}
+            {employee.name}
           </button>
         ))}
       </div>
       {weeks.map((week, weekIndex) => {
         const weekDates = new Set(week.map((date) => format(date, "yyyy-MM-dd")));
-        const weeklyHours = highlightedDoctor
+        const weeklyHours = highlightedEmployee
           ? candidate.assignments.reduce((total, assignment) => {
             if (
               !weekDates.has(assignment.date) ||
               !assignment.employees.some(
-                (employee) => employee.id === highlightedDoctor.id,
+                (employee) => employee.id === highlightedEmployee.id,
               )
             ) return total;
             return total + (sessions.find((session) => session.id === assignment.session)?.hours ?? 0);
@@ -1729,9 +1732,9 @@ function ScheduleGrid({
           : 0;
         return (
         <div key={weekIndex}>
-          {highlightedDoctor && (
+          {highlightedEmployee && (
             <div className="count-pill" style={{display: "inline-flex", marginBottom: 8}}>
-              {t("weeklyHours", {name: highlightedDoctor.name, hours: weeklyHours})}
+              {t("weeklyHours", {name: highlightedEmployee.name, hours: weeklyHours})}
             </div>
           )}
           <table className="schedule" style={{marginBottom: 13}}>
@@ -1777,7 +1780,7 @@ function ScheduleGrid({
                   const assignment = candidate.assignments.find((item) => item.date === dateKey && item.session === session.id);
                   return outsideMonth ? <td className="closed" key={dateKey}>—</td> : closed ? <td className="closed" key={dateKey}>{t("closed")}</td> : (
                     <td key={dateKey}>{assignment?.employees.map((employee) => {
-                      const doctorColor = employee.role === "DOCTOR" ? doctorColors.get(employee.id) : undefined;
+                      const staffColor = staffColors.get(employee.id);
                       const highlighted = highlightedEmployeeId === employee.id;
                       return (
                         <div key={employee.id} style={{display: "flex", alignItems: "stretch", gap: 3}}>
@@ -1791,11 +1794,11 @@ function ScheduleGrid({
                             style={{
                               flex: 1,
                               borderStyle: "solid",
-                              borderWidth: highlighted ? 2 : doctorColor ? 1 : 0,
+                              borderWidth: highlighted ? 2 : staffColor ? 1 : 0,
                               boxShadow: highlighted ? "0 0 0 3px var(--sage-deep)" : undefined,
                               position: highlighted ? "relative" : undefined,
                               zIndex: highlighted ? 1 : undefined,
-                              ...doctorColor,
+                              ...staffColor,
                             }}
                           >
                             {employee.name}
