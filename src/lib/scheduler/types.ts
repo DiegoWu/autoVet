@@ -89,6 +89,8 @@ export interface SchedulerConfig {
   endDate: LocalDate;
   seed: string | number;
   candidateCount?: number;
+  /** Override how many construction attempts to run. Defaults to max(20, candidateCount * 12). */
+  attemptCount?: number;
   coverage: Coverage | CoverageRequirement[];
   maxDoctorsPerShift?: number;
   maxDoctorsPerShiftByDate?: Partial<Record<LocalDate, number>>;

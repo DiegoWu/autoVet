@@ -374,6 +374,13 @@ export function validateSchedulerInput(
       message: "candidateCount must be a positive integer.",
     });
   }
+  if (config.attemptCount !== undefined && (!Number.isInteger(config.attemptCount) || config.attemptCount < 1)) {
+    issues.push({
+      severity: "error",
+      code: "INVALID_ATTEMPT_COUNT",
+      message: "attemptCount must be a positive integer.",
+    });
+  }
   return issues;
 }
 
@@ -1457,7 +1464,7 @@ export function generateScheduleCandidates(
   const weeklyTargets = buildWeeklyTargets(employees, slots);
   const weeklyDayTargets = buildWeeklyDayTargets(employees, slots);
   const requested = config.candidateCount ?? 3;
-  const attempts = Math.max(20, requested * 12);
+  const attempts = config.attemptCount ?? Math.max(20, requested * 12);
   const distinct = new Map<string, ScheduleCandidate>();
   let bestFailed: Attempt | undefined;
 

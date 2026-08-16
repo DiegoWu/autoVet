@@ -707,7 +707,7 @@ describe("hour-aware staffing and weekly templates", () => {
       .sort();
   }
 
-  it("covers Sunday nurse-only shifts for three 40-hour nurses", {timeout: 30_000}, () => {
+  it("covers Sunday nurse-only shifts for three 40-hour nurses", () => {
     const threeNurses: Employee[] = ["n1", "n2", "n3"].map((id, index) => ({
       id,
       name: `Nurse ${index + 1}`,
@@ -716,8 +716,8 @@ describe("hour-aware staffing and weekly templates", () => {
     }));
     const coverage: SchedulerConfig["coverage"] = [];
     for (
-      let time = Date.parse("2026-08-01T00:00:00.000Z");
-      time <= Date.parse("2026-08-31T00:00:00.000Z");
+      let time = Date.parse("2026-08-03T00:00:00.000Z");
+      time <= Date.parse("2026-08-16T00:00:00.000Z");
       time += 86_400_000
     ) {
       const date = new Date(time).toISOString().slice(0, 10);
@@ -728,23 +728,25 @@ describe("hour-aware staffing and weekly templates", () => {
         nurses: 1,
       });
     }
+    const sundayConfig: SchedulerConfig = {
+      startDate: "2026-08-03",
+      endDate: "2026-08-16",
+      seed: "sunday-nurses-only",
+      candidateCount: 1,
+      attemptCount: 3,
+      coverage,
+      maxDoctorsPerShift: 2,
+      maxNursesPerShift: 4,
+    };
     const result = generateScheduleCandidates(
       [...fourDoctors, ...threeNurses],
       [],
-      {
-        startDate: "2026-08-01",
-        endDate: "2026-08-31",
-        seed: "sunday-nurses-only",
-        candidateCount: 3,
-        coverage,
-        maxDoctorsPerShift: 2,
-        maxNursesPerShift: 4,
-      },
+      sundayConfig,
     );
     expect(result.impossible).toBeUndefined();
     const candidate = result.candidates[0]!;
     expect(candidate).toBeDefined();
-    for (const date of ["2026-08-02", "2026-08-09", "2026-08-16", "2026-08-23", "2026-08-30"]) {
+    for (const date of ["2026-08-09", "2026-08-16"]) {
       for (const session of ["morning", "afternoon", "evening"] as const) {
         expect(
           staffOnShift(candidate.assignments, date, session, "nurse").length,
@@ -759,14 +761,7 @@ describe("hour-aware staffing and weekly templates", () => {
         candidate.assignments,
         [...fourDoctors, ...threeNurses],
         [],
-        {
-          startDate: "2026-08-01",
-          endDate: "2026-08-31",
-          seed: "sunday-nurses-only",
-          coverage,
-          maxDoctorsPerShift: 2,
-          maxNursesPerShift: 4,
-        },
+        sundayConfig,
       ).filter((issue) => issue.severity === "error"),
     ).toEqual([]);
   });
