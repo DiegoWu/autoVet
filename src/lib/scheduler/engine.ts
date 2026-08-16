@@ -172,6 +172,18 @@ function maxDoctorsForDate(
   return config.maxDoctorsPerShiftByDate?.[date] ?? config.maxDoctorsPerShift;
 }
 
+function maxNursesForShift(config: SchedulerConfig): number | undefined {
+  return config.maxNursesPerShift;
+}
+
+function maxForRole(
+  role: EmployeeRole,
+  config: SchedulerConfig,
+  date: LocalDate,
+): number | undefined {
+  return role === "doctor" ? maxDoctorsForDate(config, date) : maxNursesForShift(config);
+}
+
 export function validateSchedulerInput(
   employees: Employee[],
   timeOff: TimeOff[],
@@ -292,6 +304,16 @@ export function validateSchedulerInput(
         message: "Minimum doctor coverage cannot exceed the maximum doctors per shift.",
       });
     }
+    if (
+      config.maxNursesPerShift !== undefined &&
+      requirement.nurses > config.maxNursesPerShift
+    ) {
+      issues.push({
+        severity: "error",
+        code: "NURSE_MINIMUM_EXCEEDS_MAXIMUM",
+        message: "Minimum nurse coverage cannot exceed the maximum nurses per shift.",
+      });
+    }
   }
   if (
     config.maxDoctorsPerShift !== undefined &&
@@ -301,6 +323,16 @@ export function validateSchedulerInput(
       severity: "error",
       code: "INVALID_MAX_DOCTORS",
       message: "Maximum doctors per shift must be a positive integer.",
+    });
+  }
+  if (
+    config.maxNursesPerShift !== undefined &&
+    (!Number.isInteger(config.maxNursesPerShift) || config.maxNursesPerShift < 0)
+  ) {
+    issues.push({
+      severity: "error",
+      code: "INVALID_MAX_NURSES",
+      message: "Maximum nurses per shift must be a non-negative integer.",
     });
   }
   for (const [date, maximum] of Object.entries(
@@ -462,6 +494,581 @@ function validateAbsoluteWorkdayTargets(
   return issues;
 }
 
+function isoWeekday(date: LocalDate): number {
+  const parsed = parseLocalDate(date);
+  if (!parsed) return 0;
+  return (parsed.getUTCDay() + 6) % 7;
+}
+
+function assignmentFor(employee: Employee, slot: Slot): Assignment {
+  return {
+    employeeId: employee.id,
+    date: slot.date,
+    session: slot.session,
+    role: employee.role,
+    hours: SESSIONS[slot.session].hours,
+  };
+}
+
+function assignedOnSlot(
+  assignments: Assignment[],
+  slot: Slot,
+): Assignment[] {
+  return assignments.filter(
+    (assignment) =>
+      assignment.date === slot.date &&
+      assignment.session === slot.session &&
+      assignment.role === slot.role,
+  );
+}
+
+function atRoleCap(
+  assignments: Assignment[],
+  date: LocalDate,
+  session: SessionId,
+  role: EmployeeRole,
+  config: SchedulerConfig,
+): boolean {
+  const maximum = maxForRole(role, config, date);
+  if (maximum === undefined) return false;
+  return assignments.filter(
+    (assignment) =>
+      assignment.role === role &&
+      assignment.date === date &&
+      assignment.session === session,
+  ).length >= maximum;
+}
+
+function maxStaffForSlot(
+  slot: Slot,
+  config: SchedulerConfig,
+  roleStaffCount: number,
+): number {
+  const maximum = maxForRole(slot.role, config, slot.date);
+  if (maximum !== undefined) return Math.min(maximum, roleStaffCount);
+  return roleStaffCount;
+}
+
+function templateKey(date: LocalDate, session: SessionId, role: EmployeeRole): string {
+  return `${isoWeekday(date)}|${session}|${role}`;
+}
+
+function consecutiveRunContaining(dates: ReadonlySet<LocalDate>, date: LocalDate): number {
+  let run = 1;
+  let cursor = date;
+  while (dates.has(offsetLocalDate(cursor, -1))) {
+    cursor = offsetLocalDate(cursor, -1);
+    run += 1;
+  }
+  cursor = date;
+  while (dates.has(offsetLocalDate(cursor, 1))) {
+    cursor = offsetLocalDate(cursor, 1);
+    run += 1;
+  }
+  return run;
+}
+
+function restDayFillRank(date: LocalDate, slots: Slot[]): number {
+  const week = weekKey(date);
+  const dates = [...new Set(
+    slots.filter((slot) => weekKey(slot.date) === week).map((slot) => slot.date),
+  )].sort();
+  if (dates.length < 7) return 1;
+  return date === dates[dates.length - 1] ? 0 : 1;
+}
+
+function sortSlotsByScarcity(
+  slots: Slot[],
+  activeEmployees: Employee[],
+  unavailable: Set<string>,
+): Slot[] {
+  return [...slots].sort((left, right) => {
+    const leftPool = activeEmployees.filter(
+      (employee) =>
+        employee.role === left.role &&
+        !unavailable.has(`${employee.id}|${left.date}|${left.session}`),
+    ).length;
+    const rightPool = activeEmployees.filter(
+      (employee) =>
+        employee.role === right.role &&
+        !unavailable.has(`${employee.id}|${right.date}|${right.session}`),
+    ).length;
+    return (
+      restDayFillRank(left.date, slots) - restDayFillRank(right.date, slots) ||
+      leftPool - left.required - (rightPool - right.required) ||
+      `${left.date}|${left.session}|${left.role}`.localeCompare(
+        `${right.date}|${right.session}|${right.role}`,
+      )
+    );
+  });
+}
+
+function staffingCapacity(
+  weekSlots: Slot[],
+  employees: Employee[],
+  weeklyTargets: ReadonlyMap<string, number>,
+  week: string,
+  config: SchedulerConfig,
+): Array<{ role: EmployeeRole; targetHours: number; maxHours: number }> {
+  const reports: Array<{ role: EmployeeRole; targetHours: number; maxHours: number }> = [];
+  for (const role of ROLES) {
+    const roleSlots = weekSlots.filter((slot) => slot.role === role);
+    if (roleSlots.length === 0) continue;
+    const roleStaff = employees.filter(
+      (employee) =>
+        employee.role === role &&
+        employee.active !== false &&
+        !employee.backupOnly,
+    );
+    const targetHours = roleStaff.reduce(
+      (total, employee) =>
+        total +
+        (weeklyTargets.get(`${employee.id}|${week}`) ?? employee.targetHoursPerWeek),
+      0,
+    );
+    const maxHours = roleSlots.reduce(
+      (total, slot) =>
+        total + maxStaffForSlot(slot, config, roleStaff.length) * SESSIONS[slot.session].hours,
+      0,
+    );
+    reports.push({ role, targetHours, maxHours });
+  }
+  return reports;
+}
+
+function extraSeatsForWeek(
+  weekSlots: Slot[],
+  employees: Employee[],
+  weeklyTargets: ReadonlyMap<string, number>,
+  week: string,
+  config: SchedulerConfig,
+): Array<{ slot: Slot; extras: number }> {
+  const extras: Array<{ slot: Slot; extras: number }> = [];
+  for (const role of ROLES) {
+    const roleSlots = weekSlots.filter((slot) => slot.role === role);
+    if (roleSlots.length === 0) continue;
+    const roleStaff = employees.filter(
+      (employee) =>
+        employee.role === role &&
+        employee.active !== false &&
+        !employee.backupOnly,
+    );
+    const minHours = roleSlots.reduce(
+      (total, slot) => total + slot.required * SESSIONS[slot.session].hours,
+      0,
+    );
+    const maxHours = roleSlots.reduce(
+      (total, slot) =>
+        total + maxStaffForSlot(slot, config, roleStaff.length) * SESSIONS[slot.session].hours,
+      0,
+    );
+    const targetHours = roleStaff.reduce(
+      (total, employee) =>
+        total +
+        (weeklyTargets.get(`${employee.id}|${week}`) ?? employee.targetHoursPerWeek),
+      0,
+    );
+    let remaining = Math.max(0, Math.min(targetHours, maxHours) - minHours);
+    const room = roleSlots
+      .map((slot) => ({
+        slot,
+        hours: SESSIONS[slot.session].hours,
+        room: Math.max(0, maxStaffForSlot(slot, config, roleStaff.length) - slot.required),
+      }))
+      .filter((item) => item.room > 0)
+      .sort(
+        (left, right) =>
+          right.hours - left.hours ||
+          isoWeekday(left.slot.date) - isoWeekday(right.slot.date) ||
+          left.slot.session.localeCompare(right.slot.session),
+      );
+    const added = new Map<string, { slot: Slot; extras: number }>();
+    while (remaining > 0.01) {
+      const next = room.find((item) => item.room > 0);
+      if (!next) break;
+      next.room -= 1;
+      remaining -= next.hours;
+      const key = `${next.slot.date}|${next.slot.session}|${next.slot.role}`;
+      const existing = added.get(key);
+      if (existing) existing.extras += 1;
+      else added.set(key, { slot: next.slot, extras: 1 });
+    }
+    extras.push(...added.values());
+  }
+  return extras;
+}
+
+interface AttemptContext {
+  assignments: Assignment[];
+  employees: Employee[];
+  activeEmployees: Employee[];
+  unavailable: Set<string>;
+  weeklyTargets: Map<string, number>;
+  weeklyDayTargets: Map<string, number>;
+  config: SchedulerConfig;
+  random: () => number;
+}
+
+function pickForSlot(
+  slot: Slot,
+  context: AttemptContext,
+  options: { excludeBackup?: boolean; preferIds?: ReadonlySet<string> } = {},
+): Assignment | undefined {
+  const weeklyHours = new Map<string, number>();
+  for (const assignment of context.assignments) {
+    const key = `${assignment.employeeId}|${weekKey(assignment.date)}`;
+    weeklyHours.set(key, (weeklyHours.get(key) ?? 0) + assignment.hours);
+  }
+  const candidates = context.activeEmployees
+    .filter(
+      (employee) =>
+        employee.role === slot.role &&
+        !(options.excludeBackup && employee.backupOnly) &&
+        !context.unavailable.has(`${employee.id}|${slot.date}|${slot.session}`) &&
+        !atRoleCap(
+          context.assignments,
+          slot.date,
+          slot.session,
+          employee.role,
+          context.config,
+        ) &&
+        !context.assignments.some(
+          (assignment) =>
+            assignment.employeeId === employee.id &&
+            assignment.date === slot.date &&
+            assignment.session === slot.session,
+        ),
+    )
+    .map((employee) => {
+      const assignment = assignmentFor(employee, slot);
+      const hours = weeklyHours.get(`${employee.id}|${weekKey(slot.date)}`) ?? 0;
+      const weeklyTarget =
+        context.weeklyTargets.get(`${employee.id}|${weekKey(slot.date)}`) ??
+        employee.targetHoursPerWeek;
+      const employeeWeek = weekKey(slot.date);
+      const workedDates = new Set(
+        context.assignments
+          .filter(
+            (existing) =>
+              existing.employeeId === employee.id &&
+              weekKey(existing.date) === employeeWeek,
+          )
+          .map((existing) => existing.date),
+      );
+      const preferredDays =
+        context.weeklyDayTargets.get(`${employee.id}|${employeeWeek}`) ??
+        employee.preferredDaysPerWeek ??
+        5;
+      const dayDistance = Math.abs(
+        workedDates.size + Number(!workedDates.has(slot.date)) - preferredDays,
+      );
+      const targetCompletion =
+        weeklyTarget > 0 ? (hours + assignment.hours) / weeklyTarget : 10_000;
+      const preference =
+        employee.preferences?.preferredSessions?.includes(slot.session) ? -2 : 0;
+      const avoidance =
+        employee.preferences?.avoidedSessions?.includes(slot.session) ? 3 : 0;
+      const dateAvoidance =
+        employee.preferences?.avoidedDates?.includes(slot.date) ? 3 : 0;
+      const coworkerAvoidance = context.assignments.filter(
+        (existing) =>
+          existing.date === slot.date &&
+          existing.session === slot.session &&
+          employee.preferences?.discouragedCoworkerIds?.includes(existing.employeeId),
+      ).length;
+      const weeklyPatternMatch = context.assignments.some(
+        (existing) =>
+          existing.employeeId === employee.id &&
+          existing.session === slot.session &&
+          (
+            existing.date === offsetLocalDate(slot.date, -7) ||
+            existing.date === offsetLocalDate(slot.date, 7)
+          ),
+      );
+      const templateMatch = options.preferIds?.has(employee.id) ?? false;
+      const alreadyWorksDay = workedDates.has(slot.date);
+      const workedCalendarDates = new Set(
+        context.assignments
+          .filter((existing) => existing.employeeId === employee.id)
+          .map((existing) => existing.date),
+      );
+      workedCalendarDates.add(slot.date);
+      const consecutiveRun = alreadyWorksDay
+        ? 0
+        : consecutiveRunContaining(workedCalendarDates, slot.date);
+      const consecutivePenalty = consecutiveRun >= 6 ? 8 : consecutiveRun >= 5 ? 1.5 : 0;
+      return {
+        employee,
+        assignment,
+        valid: isHardValid(
+          [...context.assignments, assignment],
+          context.employees,
+          context.config,
+        ),
+        backupPriority: employee.backupOnly ? 1 : 0,
+        priority:
+          targetCompletion +
+          dayDistance * 0.12 +
+          (alreadyWorksDay ? -4 : 0) +
+          consecutivePenalty +
+          (weeklyPatternMatch ? -5 : 0) +
+          (templateMatch ? -5 : 0) +
+          preference * 0.03 +
+          avoidance * 0.03 +
+          dateAvoidance * 0.08 +
+          coworkerAvoidance * 0.2 +
+          context.random() * 0.05,
+      };
+    })
+    .filter((candidate) => candidate.valid)
+    .sort(
+      (left, right) =>
+        left.backupPriority - right.backupPriority ||
+        left.priority - right.priority ||
+        left.employee.id.localeCompare(right.employee.id),
+    );
+  return candidates[0]?.assignment;
+}
+
+function fillMinCoverage(
+  slots: Slot[],
+  context: AttemptContext,
+  preferBySlot?: ReadonlyMap<string, ReadonlySet<string>>,
+): Attempt["uncovered"] {
+  const uncovered: Attempt["uncovered"] = [];
+  const ordered = sortSlotsByScarcity(
+    slots,
+    context.activeEmployees,
+    context.unavailable,
+  );
+  for (const slot of ordered) {
+    let assigned = assignedOnSlot(context.assignments, slot).length;
+    while (assigned < slot.required) {
+      const selected = pickForSlot(slot, context, {
+        preferIds: preferBySlot?.get(`${slot.date}|${slot.session}|${slot.role}`),
+      });
+      if (!selected) break;
+      context.assignments.push(selected);
+      assigned += 1;
+    }
+    if (assigned < slot.required) {
+      uncovered.push({ ...slot, assigned });
+    }
+  }
+  return uncovered;
+}
+
+function fillExtraSeats(
+  extras: Array<{ slot: Slot; extras: number }>,
+  context: AttemptContext,
+  preferBySlot?: ReadonlyMap<string, ReadonlySet<string>>,
+): void {
+  for (const { slot, extras: extraCount } of extras) {
+    const target = slot.required + extraCount;
+    let assigned = assignedOnSlot(context.assignments, slot).length;
+    while (assigned < target) {
+      const selected = pickForSlot(slot, context, {
+        excludeBackup: true,
+        preferIds: preferBySlot?.get(`${slot.date}|${slot.session}|${slot.role}`),
+      });
+      if (!selected) break;
+      context.assignments.push(selected);
+      assigned += 1;
+    }
+  }
+}
+
+function fillResidualHours(
+  week: string,
+  weekSlots: Slot[],
+  context: AttemptContext,
+): void {
+  let added = true;
+  while (added) {
+    added = false;
+    const hoursByEmployee = new Map<string, number>();
+    for (const assignment of context.assignments) {
+      if (weekKey(assignment.date) !== week) continue;
+      hoursByEmployee.set(
+        assignment.employeeId,
+        (hoursByEmployee.get(assignment.employeeId) ?? 0) + assignment.hours,
+      );
+    }
+
+    const underTarget = context.activeEmployees
+      .filter((employee) => !employee.backupOnly)
+      .filter((employee) => {
+        const current = hoursByEmployee.get(employee.id) ?? 0;
+        const target =
+          context.weeklyTargets.get(`${employee.id}|${week}`) ??
+          employee.targetHoursPerWeek;
+        return target > current;
+      })
+      .sort((left, right) => {
+        const leftTarget =
+          context.weeklyTargets.get(`${left.id}|${week}`) ?? left.targetHoursPerWeek;
+        const rightTarget =
+          context.weeklyTargets.get(`${right.id}|${week}`) ?? right.targetHoursPerWeek;
+        const leftRatio = (hoursByEmployee.get(left.id) ?? 0) / leftTarget;
+        const rightRatio = (hoursByEmployee.get(right.id) ?? 0) / rightTarget;
+        return leftRatio - rightRatio || left.id.localeCompare(right.id);
+      });
+
+    for (const employee of underTarget) {
+      const current = hoursByEmployee.get(employee.id) ?? 0;
+      const target =
+        context.weeklyTargets.get(`${employee.id}|${week}`) ??
+        employee.targetHoursPerWeek;
+      const remaining = target - current;
+      const options = weekSlots
+        .filter(
+          (slot) =>
+            slot.role === employee.role &&
+            !context.unavailable.has(`${employee.id}|${slot.date}|${slot.session}`) &&
+            !atRoleCap(
+              context.assignments,
+              slot.date,
+              slot.session,
+              employee.role,
+              context.config,
+            ) &&
+            !context.assignments.some(
+              (assignment) =>
+                assignment.employeeId === employee.id &&
+                assignment.date === slot.date &&
+                assignment.session === slot.session,
+            ),
+        )
+        .map((slot) => {
+          const assignment = assignmentFor(employee, slot);
+          const workedDates = new Set(
+            context.assignments
+              .filter(
+                (existing) =>
+                  existing.employeeId === employee.id &&
+                  weekKey(existing.date) === week,
+              )
+              .map((existing) => existing.date),
+          );
+          const targetDays =
+            context.weeklyDayTargets.get(`${employee.id}|${week}`) ??
+            employee.preferredDaysPerWeek ??
+            5;
+          return {
+            assignment,
+            remainingAfter: remaining - assignment.hours,
+            dayDistance: Math.abs(
+              workedDates.size +
+              Number(!workedDates.has(assignment.date)) -
+              targetDays,
+            ),
+            alreadyWorksDay: workedDates.has(assignment.date) ? 0 : 1,
+            preferencePenalty:
+              Number(employee.preferences?.avoidedDates?.includes(slot.date)) +
+              context.assignments.filter(
+                (existing) =>
+                  existing.date === slot.date &&
+                  existing.session === slot.session &&
+                  employee.preferences?.discouragedCoworkerIds?.includes(
+                    existing.employeeId,
+                  ),
+              ).length,
+            weeklyPatternMatch: context.assignments.some(
+              (existing) =>
+                existing.employeeId === employee.id &&
+                existing.session === slot.session &&
+                (
+                  existing.date === offsetLocalDate(slot.date, -7) ||
+                  existing.date === offsetLocalDate(slot.date, 7)
+                ),
+            ),
+            tieBreaker: context.random(),
+            valid: isHardValid(
+              [...context.assignments, assignment],
+              context.employees,
+              context.config,
+            ),
+          };
+        })
+        .filter((option) => option.valid)
+        .sort(
+          (left, right) =>
+            left.alreadyWorksDay - right.alreadyWorksDay ||
+            Math.abs(left.remainingAfter) - Math.abs(right.remainingAfter) ||
+            Number(right.weeklyPatternMatch) - Number(left.weeklyPatternMatch) ||
+            left.dayDistance - right.dayDistance ||
+            left.preferencePenalty - right.preferencePenalty ||
+            left.tieBreaker - right.tieBreaker,
+        );
+
+      const selected = options[0];
+      if (!selected) continue;
+      context.assignments.push(selected.assignment);
+      added = true;
+      break;
+    }
+  }
+}
+
+function buildWeekTemplate(
+  assignments: Assignment[],
+  weekSlots: Slot[],
+): Map<string, string[]> {
+  const template = new Map<string, string[]>();
+  for (const slot of weekSlots) {
+    const key = templateKey(slot.date, slot.session, slot.role);
+    if (template.has(key)) continue;
+    template.set(
+      key,
+      assignedOnSlot(assignments, slot).map((assignment) => assignment.employeeId),
+    );
+  }
+  return template;
+}
+
+function copyTemplateToWeek(
+  weekSlots: Slot[],
+  template: ReadonlyMap<string, string[]>,
+  context: AttemptContext,
+): Map<string, Set<string>> {
+  const preferBySlot = new Map<string, Set<string>>();
+  const byId = new Map(
+    context.activeEmployees.map((employee) => [employee.id, employee]),
+  );
+  for (const slot of weekSlots) {
+    const ids = template.get(templateKey(slot.date, slot.session, slot.role)) ?? [];
+    preferBySlot.set(`${slot.date}|${slot.session}|${slot.role}`, new Set(ids));
+    for (const employeeId of ids) {
+      const employee = byId.get(employeeId);
+      if (!employee || employee.role !== slot.role) continue;
+      if (context.unavailable.has(`${employee.id}|${slot.date}|${slot.session}`)) continue;
+      if (
+        atRoleCap(
+          context.assignments,
+          slot.date,
+          slot.session,
+          employee.role,
+          context.config,
+        )
+      ) continue;
+      if (
+        context.assignments.some(
+          (assignment) =>
+            assignment.employeeId === employee.id &&
+            assignment.date === slot.date &&
+            assignment.session === slot.session,
+        )
+      ) continue;
+      const assignment = assignmentFor(employee, slot);
+      if (!isHardValid([...context.assignments, assignment], context.employees, context.config)) {
+        continue;
+      }
+      context.assignments.push(assignment);
+    }
+  }
+  return preferBySlot;
+}
+
 function runAttempt(
   employees: Employee[],
   timeOff: TimeOff[],
@@ -470,292 +1077,102 @@ function runAttempt(
   attemptNumber: number,
 ): Attempt {
   const random = randomFactory(`${String(config.seed)}:${attemptNumber}`);
-  const assignments: Assignment[] = [];
-  const unavailable = unavailableKeys(timeOff);
-  const activeEmployees = employees.filter((employee) => employee.active !== false);
-  const weeklyTargets = buildWeeklyTargets(activeEmployees, slots);
-  const weeklyDayTargets = buildWeeklyDayTargets(activeEmployees, slots);
+  const context: AttemptContext = {
+    assignments: [],
+    employees,
+    activeEmployees: employees.filter((employee) => employee.active !== false),
+    unavailable: unavailableKeys(timeOff),
+    weeklyTargets: buildWeeklyTargets(
+      employees.filter((employee) => employee.active !== false),
+      slots,
+    ),
+    weeklyDayTargets: buildWeeklyDayTargets(
+      employees.filter((employee) => employee.active !== false),
+      slots,
+    ),
+    config,
+    random,
+  };
   const uncovered: Attempt["uncovered"] = [];
-
-  const orderedSlots = [...slots].sort((left, right) => {
-    const leftPool = activeEmployees.filter(
-      (employee) =>
-        employee.role === left.role && !unavailable.has(`${employee.id}|${left.date}|${left.session}`),
-    ).length;
-    const rightPool = activeEmployees.filter(
-      (employee) =>
-        employee.role === right.role && !unavailable.has(`${employee.id}|${right.date}|${right.session}`),
-    ).length;
-    return (
-      leftPool - left.required - (rightPool - right.required) ||
-      `${left.date}|${left.session}|${left.role}`.localeCompare(
-        `${right.date}|${right.session}|${right.role}`,
-      )
-    );
-  });
-
-  for (const slot of orderedSlots) {
-    let assigned = 0;
-    while (assigned < slot.required) {
-      const weeklyHours = new Map<string, number>();
-      for (const assignment of assignments) {
-        const key = `${assignment.employeeId}|${weekKey(assignment.date)}`;
-        weeklyHours.set(key, (weeklyHours.get(key) ?? 0) + assignment.hours);
-      }
-      const candidates = activeEmployees
-        .filter(
-          (employee) =>
-            employee.role === slot.role &&
-            !unavailable.has(`${employee.id}|${slot.date}|${slot.session}`) &&
-            !assignments.some(
-              (assignment) =>
-                assignment.employeeId === employee.id &&
-                assignment.date === slot.date &&
-                assignment.session === slot.session,
-            ),
-        )
-        .map((employee) => {
-          const assignment: Assignment = {
-            employeeId: employee.id,
-            date: slot.date,
-            session: slot.session,
-            role: employee.role,
-            hours: SESSIONS[slot.session].hours,
-          };
-          const valid = isHardValid([...assignments, assignment], employees, config);
-          const hours = weeklyHours.get(`${employee.id}|${weekKey(slot.date)}`) ?? 0;
-          const weeklyTarget =
-            weeklyTargets.get(`${employee.id}|${weekKey(slot.date)}`) ??
-            employee.targetHoursPerWeek;
-          const employeeWeek = weekKey(slot.date);
-          const workedDates = new Set(
-            assignments
-              .filter(
-                (existing) =>
-                  existing.employeeId === employee.id &&
-                  weekKey(existing.date) === employeeWeek,
-              )
-              .map((existing) => existing.date),
-          );
-          const preferredDays =
-            weeklyDayTargets.get(`${employee.id}|${employeeWeek}`) ??
-            employee.preferredDaysPerWeek ??
-            5;
-          const dayDistance = Math.abs(
-            workedDates.size + Number(!workedDates.has(slot.date)) - preferredDays,
-          );
-          const targetCompletion =
-            weeklyTarget > 0
-              ? (hours + assignment.hours) / weeklyTarget
-              : 10_000;
-          const preference =
-            employee.preferences?.preferredSessions?.includes(slot.session) ? -2 : 0;
-          const avoidance =
-            employee.preferences?.avoidedSessions?.includes(slot.session) ? 3 : 0;
-          const dateAvoidance =
-            employee.preferences?.avoidedDates?.includes(slot.date) ? 3 : 0;
-          const coworkerAvoidance = assignments.filter(
-            (existing) =>
-              existing.date === slot.date &&
-              existing.session === slot.session &&
-              employee.preferences?.discouragedCoworkerIds?.includes(
-                existing.employeeId,
-              ),
-          ).length;
-          const weeklyPatternMatch = assignments.some(
-            (existing) =>
-              existing.employeeId === employee.id &&
-              existing.session === slot.session &&
-              (
-                existing.date === offsetLocalDate(slot.date, -7) ||
-                existing.date === offsetLocalDate(slot.date, 7)
-              ),
-          );
-          return {
-            employee,
-            assignment,
-            valid,
-            backupPriority: employee.backupOnly ? 1 : 0,
-            priority:
-              targetCompletion +
-              dayDistance * 0.12 +
-              (weeklyPatternMatch ? -0.2 : 0) +
-              preference * 0.03 +
-              avoidance * 0.03 +
-              dateAvoidance * 0.08 +
-              coworkerAvoidance * 0.2 +
-              random() * 0.05,
-          };
-        })
-        .filter((candidate) => candidate.valid)
-        .sort(
-          (left, right) =>
-            left.backupPriority - right.backupPriority ||
-            left.priority - right.priority ||
-            left.employee.id.localeCompare(right.employee.id),
-        );
-      const selected = candidates[0];
-      if (!selected) break;
-      assignments.push(selected.assignment);
-      assigned += 1;
-    }
-    if (assigned < slot.required) {
-      uncovered.push({ ...slot, assigned });
-    }
+  const slotsByWeek = new Map<string, Slot[]>();
+  for (const slot of slots) {
+    const week = weekKey(slot.date);
+    const weekSlots = slotsByWeek.get(week) ?? [];
+    weekSlots.push(slot);
+    slotsByWeek.set(week, weekSlots);
   }
+  const weeks = [...slotsByWeek.keys()].sort();
+  const referenceWeek = [...weeks].sort((left, right) => {
+    const leftDays = new Set((slotsByWeek.get(left) ?? []).map((slot) => slot.date)).size;
+    const rightDays = new Set((slotsByWeek.get(right) ?? []).map((slot) => slot.date)).size;
+    return rightDays - leftDays || left.localeCompare(right);
+  })[0];
 
-  // Coverage is the hard floor. Once every required role is present, use open
-  // sessions to move each employee toward their individual weekly target.
-  // This permits intentional overstaffing because coverage values are minima.
-  if (uncovered.length === 0) {
-    const weeks = [...new Set(orderedSlots.map((slot) => weekKey(slot.date)))].sort();
+  const overstaffWeek = (
+    week: string,
+    preferBySlot?: ReadonlyMap<string, ReadonlySet<string>>,
+  ) => {
+    const weekSlots = slotsByWeek.get(week) ?? [];
+    fillExtraSeats(
+      extraSeatsForWeek(
+        weekSlots,
+        context.activeEmployees,
+        context.weeklyTargets,
+        week,
+        config,
+      ),
+      context,
+      preferBySlot,
+    );
+    fillResidualHours(week, weekSlots, context);
+  };
+
+  uncovered.push(...fillMinCoverage(slots, context));
+  if (uncovered.length === 0 && referenceWeek) {
+    overstaffWeek(referenceWeek);
+    const template = buildWeekTemplate(
+      context.assignments,
+      slotsByWeek.get(referenceWeek) ?? [],
+    );
     for (const week of weeks) {
-      let added = true;
-      while (added) {
-        added = false;
-        const hoursByEmployee = new Map<string, number>();
-        for (const assignment of assignments) {
-          if (weekKey(assignment.date) !== week) continue;
-          hoursByEmployee.set(
-            assignment.employeeId,
-            (hoursByEmployee.get(assignment.employeeId) ?? 0) + assignment.hours,
-          );
-        }
-
-        const underTarget = activeEmployees
-          .filter((employee) => !employee.backupOnly)
-          .filter((employee) => {
-            const current = hoursByEmployee.get(employee.id) ?? 0;
-            const target =
-              weeklyTargets.get(`${employee.id}|${week}`) ??
-              employee.targetHoursPerWeek;
-            return target > current;
-          })
-          .sort((left, right) => {
-            const leftTarget =
-              weeklyTargets.get(`${left.id}|${week}`) ??
-              left.targetHoursPerWeek;
-            const rightTarget =
-              weeklyTargets.get(`${right.id}|${week}`) ??
-              right.targetHoursPerWeek;
-            const leftRatio =
-              (hoursByEmployee.get(left.id) ?? 0) / leftTarget;
-            const rightRatio =
-              (hoursByEmployee.get(right.id) ?? 0) / rightTarget;
-            return leftRatio - rightRatio || left.id.localeCompare(right.id);
-          });
-
-        for (const employee of underTarget) {
-          const current = hoursByEmployee.get(employee.id) ?? 0;
-          const target =
-            weeklyTargets.get(`${employee.id}|${week}`) ??
-            employee.targetHoursPerWeek;
-          const remaining = target - current;
-          const options = orderedSlots
-            .filter(
-              (slot) =>
-                slot.role === employee.role &&
-                weekKey(slot.date) === week &&
-                !unavailable.has(`${employee.id}|${slot.date}|${slot.session}`) &&
-                !(
-                  employee.role === "doctor" &&
-                maxDoctorsForDate(config, slot.date) !== undefined &&
-                  assignments.filter(
-                    (assignment) =>
-                      assignment.role === "doctor" &&
-                      assignment.date === slot.date &&
-                      assignment.session === slot.session,
-                ).length >= maxDoctorsForDate(config, slot.date)!
-                ) &&
-                !assignments.some(
-                  (assignment) =>
-                    assignment.employeeId === employee.id &&
-                    assignment.date === slot.date &&
-                    assignment.session === slot.session,
-                ),
-            )
-            .map((slot) => {
-              const assignment: Assignment = {
-                employeeId: employee.id,
-                date: slot.date,
-                session: slot.session,
-                role: employee.role,
-                hours: SESSIONS[slot.session].hours,
-              };
-              return {
-                assignment,
-                remainingAfter: remaining - assignment.hours,
-                dayDistance: (() => {
-                  const workedDates = new Set(
-                    assignments
-                      .filter(
-                        (existing) =>
-                          existing.employeeId === employee.id &&
-                          weekKey(existing.date) === week,
-                      )
-                      .map((existing) => existing.date),
-                  );
-                  const targetDays =
-                    weeklyDayTargets.get(`${employee.id}|${week}`) ??
-                    employee.preferredDaysPerWeek ??
-                    5;
-                  return Math.abs(
-                    workedDates.size +
-                    Number(!workedDates.has(assignment.date)) -
-                    targetDays,
-                  );
-                })(),
-                preferencePenalty:
-                  Number(employee.preferences?.avoidedDates?.includes(slot.date)) +
-                  assignments.filter(
-                    (existing) =>
-                      existing.date === slot.date &&
-                      existing.session === slot.session &&
-                      employee.preferences?.discouragedCoworkerIds?.includes(
-                        existing.employeeId,
-                      ),
-                  ).length,
-                weeklyPatternMatch: assignments.some(
-                  (existing) =>
-                    existing.employeeId === employee.id &&
-                    existing.session === slot.session &&
-                    (
-                      existing.date === offsetLocalDate(slot.date, -7) ||
-                      existing.date === offsetLocalDate(slot.date, 7)
-                    ),
-                ),
-                tieBreaker: random(),
-                valid: isHardValid([...assignments, assignment], employees, config),
-              };
-            })
-            .filter((option) => option.valid)
-            .sort(
-              (left, right) =>
-                Math.abs(left.remainingAfter) - Math.abs(right.remainingAfter) ||
-                left.dayDistance - right.dayDistance ||
-                left.preferencePenalty - right.preferencePenalty ||
-                Number(right.weeklyPatternMatch) - Number(left.weeklyPatternMatch) ||
-                left.tieBreaker - right.tieBreaker,
-            );
-
-          const selected = options[0];
-          if (!selected) continue;
-          assignments.push(selected.assignment);
-          added = true;
-          break;
-        }
-      }
+      if (week === referenceWeek) continue;
+      const preferBySlot = copyTemplateToWeek(
+        slotsByWeek.get(week) ?? [],
+        template,
+        context,
+      );
+      overstaffWeek(week, preferBySlot);
     }
   }
 
   const issues = [
-    ...validateLaborRules(assignments, employees, config.laborRules),
-    ...validateAbsoluteWorkdayTargets(assignments, activeEmployees, slots),
+    ...validateLaborRules(context.assignments, employees, config.laborRules),
+    ...validateAbsoluteWorkdayTargets(context.assignments, context.activeEmployees, slots),
   ];
-  const scheduledWeeks = [...new Set(slots.map((slot) => weekKey(slot.date)))];
-  for (const employee of activeEmployees.filter((item) => !item.backupOnly)) {
-    for (const week of scheduledWeeks) {
-      const assignedHours = assignments
+  for (const week of weeks) {
+    for (const report of staffingCapacity(
+      slotsByWeek.get(week) ?? [],
+      context.activeEmployees,
+      context.weeklyTargets,
+      week,
+      config,
+    )) {
+      if (report.targetHours > report.maxHours + 0.01) {
+        issues.push({
+          severity: "warning",
+          code: "STAFFING_CAP_BELOW_TARGETS",
+          message:
+            `${report.role === "doctor" ? "Doctor" : "Nurse"} targets need ` +
+            `${report.targetHours}h in week ${week}, but maximum staffing only provides ` +
+            `${report.maxHours}h.`,
+          date: week,
+        });
+      }
+    }
+  }
+  for (const employee of context.activeEmployees.filter((item) => !item.backupOnly)) {
+    for (const week of weeks) {
+      const assignedHours = context.assignments
         .filter(
           (assignment) =>
             assignment.employeeId === employee.id &&
@@ -763,7 +1180,7 @@ function runAttempt(
         )
         .reduce((total, assignment) => total + assignment.hours, 0);
       const target =
-        weeklyTargets.get(`${employee.id}|${week}`) ??
+        context.weeklyTargets.get(`${employee.id}|${week}`) ??
         employee.targetHoursPerWeek;
       if (assignedHours + 0.01 < target) {
         issues.push({
@@ -776,7 +1193,7 @@ function runAttempt(
       }
     }
   }
-  return { assignments, issues, uncovered };
+  return { assignments: context.assignments, issues, uncovered };
 }
 
 function variance(values: number[]): number {
@@ -1002,16 +1419,12 @@ export function validateSchedule(
         session: slot.session,
       });
     }
-    if (
-      slot.role === "doctor" &&
-      maxDoctorsForDate(config, slot.date) !== undefined &&
-      count > maxDoctorsForDate(config, slot.date)!
-    ) {
-      const maximum = maxDoctorsForDate(config, slot.date)!;
+    const maximum = maxForRole(slot.role, config, slot.date);
+    if (maximum !== undefined && count > maximum) {
       issues.push({
         severity: "error",
-        code: "MAX_DOCTORS_EXCEEDED",
-        message: `${slot.date} ${slot.session} has ${count} doctors, above the maximum of ${maximum}.`,
+        code: slot.role === "doctor" ? "MAX_DOCTORS_EXCEEDED" : "MAX_NURSES_EXCEEDED",
+        message: `${slot.date} ${slot.session} has ${count} ${slot.role}s, above the maximum of ${maximum}.`,
         date: slot.date,
         session: slot.session,
       });

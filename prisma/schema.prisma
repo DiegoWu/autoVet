@@ -35,6 +35,7 @@ model Clinic {
   minDoctors        Int           @default(1)
   maxDoctors        Int           @default(2)
   minNurses         Int           @default(1)
+  maxNurses         Int           @default(4)
   flexibleHoursMode Boolean       @default(false)
   approvalAttested  Boolean       @default(false)
   users             User[]

@@ -30,12 +30,14 @@ export type ClinicAvgAggregateOutputType = {
   minDoctors: number | null
   maxDoctors: number | null
   minNurses: number | null
+  maxNurses: number | null
 }
 
 export type ClinicSumAggregateOutputType = {
   minDoctors: number | null
   maxDoctors: number | null
   minNurses: number | null
+  maxNurses: number | null
 }
 
 export type ClinicMinAggregateOutputType = {
@@ -45,6 +47,7 @@ export type ClinicMinAggregateOutputType = {
   minDoctors: number | null
   maxDoctors: number | null
   minNurses: number | null
+  maxNurses: number | null
   flexibleHoursMode: boolean | null
   approvalAttested: boolean | null
   createdAt: Date | null
@@ -58,6 +61,7 @@ export type ClinicMaxAggregateOutputType = {
   minDoctors: number | null
   maxDoctors: number | null
   minNurses: number | null
+  maxNurses: number | null
   flexibleHoursMode: boolean | null
   approvalAttested: boolean | null
   createdAt: Date | null
@@ -71,6 +75,7 @@ export type ClinicCountAggregateOutputType = {
   minDoctors: number
   maxDoctors: number
   minNurses: number
+  maxNurses: number
   flexibleHoursMode: number
   approvalAttested: number
   createdAt: number
@@ -83,12 +88,14 @@ export type ClinicAvgAggregateInputType = {
   minDoctors?: true
   maxDoctors?: true
   minNurses?: true
+  maxNurses?: true
 }
 
 export type ClinicSumAggregateInputType = {
   minDoctors?: true
   maxDoctors?: true
   minNurses?: true
+  maxNurses?: true
 }
 
 export type ClinicMinAggregateInputType = {
@@ -98,6 +105,7 @@ export type ClinicMinAggregateInputType = {
   minDoctors?: true
   maxDoctors?: true
   minNurses?: true
+  maxNurses?: true
   flexibleHoursMode?: true
   approvalAttested?: true
   createdAt?: true
@@ -111,6 +119,7 @@ export type ClinicMaxAggregateInputType = {
   minDoctors?: true
   maxDoctors?: true
   minNurses?: true
+  maxNurses?: true
   flexibleHoursMode?: true
   approvalAttested?: true
   createdAt?: true
@@ -124,6 +133,7 @@ export type ClinicCountAggregateInputType = {
   minDoctors?: true
   maxDoctors?: true
   minNurses?: true
+  maxNurses?: true
   flexibleHoursMode?: true
   approvalAttested?: true
   createdAt?: true
@@ -224,6 +234,7 @@ export type ClinicGroupByOutputType = {
   minDoctors: number
   maxDoctors: number
   minNurses: number
+  maxNurses: number
   flexibleHoursMode: boolean
   approvalAttested: boolean
   createdAt: Date
@@ -260,6 +271,7 @@ export type ClinicWhereInput = {
   minDoctors?: Prisma.IntFilter<"Clinic"> | number
   maxDoctors?: Prisma.IntFilter<"Clinic"> | number
   minNurses?: Prisma.IntFilter<"Clinic"> | number
+  maxNurses?: Prisma.IntFilter<"Clinic"> | number
   flexibleHoursMode?: Prisma.BoolFilter<"Clinic"> | boolean
   approvalAttested?: Prisma.BoolFilter<"Clinic"> | boolean
   createdAt?: Prisma.DateTimeFilter<"Clinic"> | Date | string
@@ -277,6 +289,7 @@ export type ClinicOrderByWithRelationInput = {
   minDoctors?: Prisma.SortOrder
   maxDoctors?: Prisma.SortOrder
   minNurses?: Prisma.SortOrder
+  maxNurses?: Prisma.SortOrder
   flexibleHoursMode?: Prisma.SortOrder
   approvalAttested?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
@@ -297,6 +310,7 @@ export type ClinicWhereUniqueInput = Prisma.AtLeast<{
   minDoctors?: Prisma.IntFilter<"Clinic"> | number
   maxDoctors?: Prisma.IntFilter<"Clinic"> | number
   minNurses?: Prisma.IntFilter<"Clinic"> | number
+  maxNurses?: Prisma.IntFilter<"Clinic"> | number
   flexibleHoursMode?: Prisma.BoolFilter<"Clinic"> | boolean
   approvalAttested?: Prisma.BoolFilter<"Clinic"> | boolean
   createdAt?: Prisma.DateTimeFilter<"Clinic"> | Date | string
@@ -314,6 +328,7 @@ export type ClinicOrderByWithAggregationInput = {
   minDoctors?: Prisma.SortOrder
   maxDoctors?: Prisma.SortOrder
   minNurses?: Prisma.SortOrder
+  maxNurses?: Prisma.SortOrder
   flexibleHoursMode?: Prisma.SortOrder
   approvalAttested?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
@@ -335,6 +350,7 @@ export type ClinicScalarWhereWithAggregatesInput = {
   minDoctors?: Prisma.IntWithAggregatesFilter<"Clinic"> | number
   maxDoctors?: Prisma.IntWithAggregatesFilter<"Clinic"> | number
   minNurses?: Prisma.IntWithAggregatesFilter<"Clinic"> | number
+  maxNurses?: Prisma.IntWithAggregatesFilter<"Clinic"> | number
   flexibleHoursMode?: Prisma.BoolWithAggregatesFilter<"Clinic"> | boolean
   approvalAttested?: Prisma.BoolWithAggregatesFilter<"Clinic"> | boolean
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"Clinic"> | Date | string
@@ -348,6 +364,7 @@ export type ClinicCreateInput = {
   minDoctors?: number
   maxDoctors?: number
   minNurses?: number
+  maxNurses?: number
   flexibleHoursMode?: boolean
   approvalAttested?: boolean
   createdAt?: Date | string
@@ -365,6 +382,7 @@ export type ClinicUncheckedCreateInput = {
   minDoctors?: number
   maxDoctors?: number
   minNurses?: number
+  maxNurses?: number
   flexibleHoursMode?: boolean
   approvalAttested?: boolean
   createdAt?: Date | string
@@ -382,6 +400,7 @@ export type ClinicUpdateInput = {
   minDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   maxDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   minNurses?: Prisma.IntFieldUpdateOperationsInput | number
+  maxNurses?: Prisma.IntFieldUpdateOperationsInput | number
   flexibleHoursMode?: Prisma.BoolFieldUpdateOperationsInput | boolean
   approvalAttested?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -399,6 +418,7 @@ export type ClinicUncheckedUpdateInput = {
   minDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   maxDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   minNurses?: Prisma.IntFieldUpdateOperationsInput | number
+  maxNurses?: Prisma.IntFieldUpdateOperationsInput | number
   flexibleHoursMode?: Prisma.BoolFieldUpdateOperationsInput | boolean
   approvalAttested?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -416,6 +436,7 @@ export type ClinicCreateManyInput = {
   minDoctors?: number
   maxDoctors?: number
   minNurses?: number
+  maxNurses?: number
   flexibleHoursMode?: boolean
   approvalAttested?: boolean
   createdAt?: Date | string
@@ -429,6 +450,7 @@ export type ClinicUpdateManyMutationInput = {
   minDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   maxDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   minNurses?: Prisma.IntFieldUpdateOperationsInput | number
+  maxNurses?: Prisma.IntFieldUpdateOperationsInput | number
   flexibleHoursMode?: Prisma.BoolFieldUpdateOperationsInput | boolean
   approvalAttested?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -442,6 +464,7 @@ export type ClinicUncheckedUpdateManyInput = {
   minDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   maxDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   minNurses?: Prisma.IntFieldUpdateOperationsInput | number
+  maxNurses?: Prisma.IntFieldUpdateOperationsInput | number
   flexibleHoursMode?: Prisma.BoolFieldUpdateOperationsInput | boolean
   approvalAttested?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -455,6 +478,7 @@ export type ClinicCountOrderByAggregateInput = {
   minDoctors?: Prisma.SortOrder
   maxDoctors?: Prisma.SortOrder
   minNurses?: Prisma.SortOrder
+  maxNurses?: Prisma.SortOrder
   flexibleHoursMode?: Prisma.SortOrder
   approvalAttested?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
@@ -465,6 +489,7 @@ export type ClinicAvgOrderByAggregateInput = {
   minDoctors?: Prisma.SortOrder
   maxDoctors?: Prisma.SortOrder
   minNurses?: Prisma.SortOrder
+  maxNurses?: Prisma.SortOrder
 }
 
 export type ClinicMaxOrderByAggregateInput = {
@@ -474,6 +499,7 @@ export type ClinicMaxOrderByAggregateInput = {
   minDoctors?: Prisma.SortOrder
   maxDoctors?: Prisma.SortOrder
   minNurses?: Prisma.SortOrder
+  maxNurses?: Prisma.SortOrder
   flexibleHoursMode?: Prisma.SortOrder
   approvalAttested?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
@@ -487,6 +513,7 @@ export type ClinicMinOrderByAggregateInput = {
   minDoctors?: Prisma.SortOrder
   maxDoctors?: Prisma.SortOrder
   minNurses?: Prisma.SortOrder
+  maxNurses?: Prisma.SortOrder
   flexibleHoursMode?: Prisma.SortOrder
   approvalAttested?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
@@ -497,6 +524,7 @@ export type ClinicSumOrderByAggregateInput = {
   minDoctors?: Prisma.SortOrder
   maxDoctors?: Prisma.SortOrder
   minNurses?: Prisma.SortOrder
+  maxNurses?: Prisma.SortOrder
 }
 
 export type ClinicScalarRelationFilter = {
@@ -587,6 +615,7 @@ export type ClinicCreateWithoutSettingPlansInput = {
   minDoctors?: number
   maxDoctors?: number
   minNurses?: number
+  maxNurses?: number
   flexibleHoursMode?: boolean
   approvalAttested?: boolean
   createdAt?: Date | string
@@ -603,6 +632,7 @@ export type ClinicUncheckedCreateWithoutSettingPlansInput = {
   minDoctors?: number
   maxDoctors?: number
   minNurses?: number
+  maxNurses?: number
   flexibleHoursMode?: boolean
   approvalAttested?: boolean
   createdAt?: Date | string
@@ -635,6 +665,7 @@ export type ClinicUpdateWithoutSettingPlansInput = {
   minDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   maxDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   minNurses?: Prisma.IntFieldUpdateOperationsInput | number
+  maxNurses?: Prisma.IntFieldUpdateOperationsInput | number
   flexibleHoursMode?: Prisma.BoolFieldUpdateOperationsInput | boolean
   approvalAttested?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -651,6 +682,7 @@ export type ClinicUncheckedUpdateWithoutSettingPlansInput = {
   minDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   maxDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   minNurses?: Prisma.IntFieldUpdateOperationsInput | number
+  maxNurses?: Prisma.IntFieldUpdateOperationsInput | number
   flexibleHoursMode?: Prisma.BoolFieldUpdateOperationsInput | boolean
   approvalAttested?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -667,6 +699,7 @@ export type ClinicCreateWithoutUsersInput = {
   minDoctors?: number
   maxDoctors?: number
   minNurses?: number
+  maxNurses?: number
   flexibleHoursMode?: boolean
   approvalAttested?: boolean
   createdAt?: Date | string
@@ -683,6 +716,7 @@ export type ClinicUncheckedCreateWithoutUsersInput = {
   minDoctors?: number
   maxDoctors?: number
   minNurses?: number
+  maxNurses?: number
   flexibleHoursMode?: boolean
   approvalAttested?: boolean
   createdAt?: Date | string
@@ -715,6 +749,7 @@ export type ClinicUpdateWithoutUsersInput = {
   minDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   maxDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   minNurses?: Prisma.IntFieldUpdateOperationsInput | number
+  maxNurses?: Prisma.IntFieldUpdateOperationsInput | number
   flexibleHoursMode?: Prisma.BoolFieldUpdateOperationsInput | boolean
   approvalAttested?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -731,6 +766,7 @@ export type ClinicUncheckedUpdateWithoutUsersInput = {
   minDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   maxDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   minNurses?: Prisma.IntFieldUpdateOperationsInput | number
+  maxNurses?: Prisma.IntFieldUpdateOperationsInput | number
   flexibleHoursMode?: Prisma.BoolFieldUpdateOperationsInput | boolean
   approvalAttested?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -747,6 +783,7 @@ export type ClinicCreateWithoutEmployeesInput = {
   minDoctors?: number
   maxDoctors?: number
   minNurses?: number
+  maxNurses?: number
   flexibleHoursMode?: boolean
   approvalAttested?: boolean
   createdAt?: Date | string
@@ -763,6 +800,7 @@ export type ClinicUncheckedCreateWithoutEmployeesInput = {
   minDoctors?: number
   maxDoctors?: number
   minNurses?: number
+  maxNurses?: number
   flexibleHoursMode?: boolean
   approvalAttested?: boolean
   createdAt?: Date | string
@@ -795,6 +833,7 @@ export type ClinicUpdateWithoutEmployeesInput = {
   minDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   maxDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   minNurses?: Prisma.IntFieldUpdateOperationsInput | number
+  maxNurses?: Prisma.IntFieldUpdateOperationsInput | number
   flexibleHoursMode?: Prisma.BoolFieldUpdateOperationsInput | boolean
   approvalAttested?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -811,6 +850,7 @@ export type ClinicUncheckedUpdateWithoutEmployeesInput = {
   minDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   maxDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   minNurses?: Prisma.IntFieldUpdateOperationsInput | number
+  maxNurses?: Prisma.IntFieldUpdateOperationsInput | number
   flexibleHoursMode?: Prisma.BoolFieldUpdateOperationsInput | boolean
   approvalAttested?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -827,6 +867,7 @@ export type ClinicCreateWithoutScheduleRunsInput = {
   minDoctors?: number
   maxDoctors?: number
   minNurses?: number
+  maxNurses?: number
   flexibleHoursMode?: boolean
   approvalAttested?: boolean
   createdAt?: Date | string
@@ -843,6 +884,7 @@ export type ClinicUncheckedCreateWithoutScheduleRunsInput = {
   minDoctors?: number
   maxDoctors?: number
   minNurses?: number
+  maxNurses?: number
   flexibleHoursMode?: boolean
   approvalAttested?: boolean
   createdAt?: Date | string
@@ -875,6 +917,7 @@ export type ClinicUpdateWithoutScheduleRunsInput = {
   minDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   maxDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   minNurses?: Prisma.IntFieldUpdateOperationsInput | number
+  maxNurses?: Prisma.IntFieldUpdateOperationsInput | number
   flexibleHoursMode?: Prisma.BoolFieldUpdateOperationsInput | boolean
   approvalAttested?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -891,6 +934,7 @@ export type ClinicUncheckedUpdateWithoutScheduleRunsInput = {
   minDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   maxDoctors?: Prisma.IntFieldUpdateOperationsInput | number
   minNurses?: Prisma.IntFieldUpdateOperationsInput | number
+  maxNurses?: Prisma.IntFieldUpdateOperationsInput | number
   flexibleHoursMode?: Prisma.BoolFieldUpdateOperationsInput | boolean
   approvalAttested?: Prisma.BoolFieldUpdateOperationsInput | boolean
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -965,6 +1009,7 @@ export type ClinicSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs =
   minDoctors?: boolean
   maxDoctors?: boolean
   minNurses?: boolean
+  maxNurses?: boolean
   flexibleHoursMode?: boolean
   approvalAttested?: boolean
   createdAt?: boolean
@@ -983,6 +1028,7 @@ export type ClinicSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extens
   minDoctors?: boolean
   maxDoctors?: boolean
   minNurses?: boolean
+  maxNurses?: boolean
   flexibleHoursMode?: boolean
   approvalAttested?: boolean
   createdAt?: boolean
@@ -996,6 +1042,7 @@ export type ClinicSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extens
   minDoctors?: boolean
   maxDoctors?: boolean
   minNurses?: boolean
+  maxNurses?: boolean
   flexibleHoursMode?: boolean
   approvalAttested?: boolean
   createdAt?: boolean
@@ -1009,13 +1056,14 @@ export type ClinicSelectScalar = {
   minDoctors?: boolean
   maxDoctors?: boolean
   minNurses?: boolean
+  maxNurses?: boolean
   flexibleHoursMode?: boolean
   approvalAttested?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }
 
-export type ClinicOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "name" | "defaultLocale" | "minDoctors" | "maxDoctors" | "minNurses" | "flexibleHoursMode" | "approvalAttested" | "createdAt" | "updatedAt", ExtArgs["result"]["clinic"]>
+export type ClinicOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "name" | "defaultLocale" | "minDoctors" | "maxDoctors" | "minNurses" | "maxNurses" | "flexibleHoursMode" | "approvalAttested" | "createdAt" | "updatedAt", ExtArgs["result"]["clinic"]>
 export type ClinicInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   users?: boolean | Prisma.Clinic$usersArgs<ExtArgs>
   employees?: boolean | Prisma.Clinic$employeesArgs<ExtArgs>
@@ -1041,6 +1089,7 @@ export type $ClinicPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs
     minDoctors: number
     maxDoctors: number
     minNurses: number
+    maxNurses: number
     flexibleHoursMode: boolean
     approvalAttested: boolean
     createdAt: Date
@@ -1478,6 +1527,7 @@ export interface ClinicFieldRefs {
   readonly minDoctors: Prisma.FieldRef<"Clinic", 'Int'>
   readonly maxDoctors: Prisma.FieldRef<"Clinic", 'Int'>
   readonly minNurses: Prisma.FieldRef<"Clinic", 'Int'>
+  readonly maxNurses: Prisma.FieldRef<"Clinic", 'Int'>
   readonly flexibleHoursMode: Prisma.FieldRef<"Clinic", 'Boolean'>
   readonly approvalAttested: Prisma.FieldRef<"Clinic", 'Boolean'>
   readonly createdAt: Prisma.FieldRef<"Clinic", 'DateTime'>

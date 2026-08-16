@@ -1,7 +1,7 @@
 import {NextResponse} from "next/server";
 import {z} from "zod";
 import {Prisma} from "@/generated/prisma/client";
-import {requireSession} from "@/lib/auth";
+import {isAuthConfigured, requireSession} from "@/lib/auth";
 import {getPrisma} from "@/lib/db";
 import {settingPlanPayloadSchema} from "@/lib/setting-plan";
 
@@ -12,7 +12,10 @@ const CreateSchema = z.object({
 
 export async function GET(request: Request) {
   const session = await requireSession(request);
-  if (!session) return NextResponse.json({error: "Unauthorized"}, {status: 401});
+  if (!session) {
+    if (!isAuthConfigured()) return NextResponse.json([]);
+    return NextResponse.json({error: "Unauthorized"}, {status: 401});
+  }
   try {
     const prisma = await getPrisma();
     const plans = await prisma.settingPlan.findMany({

@@ -11,6 +11,7 @@ export const settingPlanPayloadSchema = z.object({
   minDoctors: z.number().int().min(1),
   maxDoctors: z.number().int().min(1),
   minNurses: z.number().int().min(0),
+  maxNurses: z.number().int().min(0).default(4),
   singleDoctorWeekdays: z.array(z.number().int().min(0).max(6)).default([]),
   popularDayRules: z.array(z.object({
     weekday: z.number().int().min(0).max(6),
@@ -37,6 +38,9 @@ export const settingPlanPayloadSchema = z.object({
     weekdayConstraintStrength: z.enum(["ABSOLUTE", "PREFERRED"]).default("ABSOLUTE"),
     daysPerWeekConstraintStrength: z.enum(["ABSOLUTE", "PREFERRED"]).default("PREFERRED"),
   })).default([]),
-}).strict();
+}).strict().refine((payload) => payload.maxNurses >= payload.minNurses, {
+  message: "Maximum nurses must be greater than or equal to minimum nurses",
+  path: ["maxNurses"],
+});
 
 export type SettingPlanPayload = z.infer<typeof settingPlanPayloadSchema>;

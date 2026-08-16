@@ -1212,6 +1212,7 @@ export const ClinicScalarFieldEnum = {
   minDoctors: 'minDoctors',
   maxDoctors: 'maxDoctors',
   minNurses: 'minNurses',
+  maxNurses: 'maxNurses',
   flexibleHoursMode: 'flexibleHoursMode',
   approvalAttested: 'approvalAttested',
   createdAt: 'createdAt',

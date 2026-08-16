@@ -38,6 +38,7 @@ const SaveSchema = z.object({
     minDoctors: z.number().int().min(1),
     maxDoctors: z.number().int().min(1),
     minNurses: z.number().int().min(0),
+    maxNurses: z.number().int().min(0).default(4),
     ...sundayConfigFields,
     singleDoctorWeekdays: z.array(z.number().int().min(0).max(6)).default([]),
     popularDayRules: z.array(z.object({
@@ -70,6 +71,13 @@ const SaveSchema = z.object({
       code: "custom",
       message: "Maximum doctors must be greater than or equal to minimum doctors",
       path: ["config", "maxDoctors"],
+    });
+  }
+  if (input.config.maxNurses < input.config.minNurses) {
+    context.addIssue({
+      code: "custom",
+      message: "Maximum nurses must be greater than or equal to minimum nurses",
+      path: ["config", "maxNurses"],
     });
   }
   if (input.mode === "DOCTOR_ONLY" && input.config.minNurses !== 0) {
@@ -114,6 +122,13 @@ const SaveSchema = z.object({
       context.addIssue({
         code: "custom",
         message: "Combined popular-day rules require at least one nurse",
+        path: ["config", "popularDayRules", index, "minNurses"],
+      });
+    }
+    if (rule.minNurses > input.config.maxNurses) {
+      context.addIssue({
+        code: "custom",
+        message: "Popular-day nurse minimum exceeds the maximum",
         path: ["config", "popularDayRules", index, "minNurses"],
       });
     }
@@ -205,6 +220,7 @@ export async function POST(request: Request) {
           minDoctors: input.config.minDoctors,
           maxDoctors: input.config.maxDoctors,
           minNurses: input.config.minNurses,
+          maxNurses: input.config.maxNurses,
           flexibleHoursMode: input.config.flex,
           approvalAttested: input.config.attested,
         },

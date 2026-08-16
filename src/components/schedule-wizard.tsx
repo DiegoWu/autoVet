@@ -17,6 +17,7 @@ import {
   type UnavailableShift,
 } from "@/lib/schedule-constraints";
 import type {SettingPlanPayload} from "@/lib/setting-plan";
+import {buildGeneratedSchedule, generateScheduleInputSchema} from "@/lib/scheduler/from-input";
 
 type Role = "DOCTOR" | "NURSE";
 type StaffRole = Role | "BACKUP_DOCTOR";
@@ -115,25 +116,6 @@ function targetHoursForMonth(
   );
 }
 
-function targetDaysForMonth(
-  preferredDaysPerWeek: number,
-  month: string,
-  sundayMode: SundayMode,
-  role?: Role,
-) {
-  const daysByWeek = new Map<string, number>();
-  for (const date of monthDates(month)) {
-    if (!countsTowardTarget(date, sundayMode, role)) continue;
-    const daysFromMonday = (getDay(date) + 6) % 7;
-    const week = format(addDays(date, -daysFromMonday), "yyyy-MM-dd");
-    daysByWeek.set(week, (daysByWeek.get(week) ?? 0) + 1);
-  }
-  return [...daysByWeek.values()].reduce(
-    (total, days) => total + Math.min(preferredDaysPerWeek, days),
-    0,
-  );
-}
-
 function employeeUnavailableOn(
   employee: Employee,
   dateKey: string,
@@ -149,177 +131,10 @@ function employeeUnavailableOn(
     );
 }
 
-function makeCandidates(
-  employees: Employee[],
-  month: string,
-  minDoctors: number,
-  minNurses: number,
-  sundayMode: SundayMode,
-  singleDoctorWeekdays: number[],
-  popularDayRules: PopularDayRule[],
-  preferences: Preference[],
-  avoidances: Preference[],
-  candidateCount = 6,
-  batch = 0,
-): Candidate[] {
-  const doctors = employees.filter((employee) => employee.role === "DOCTOR");
-  const nurses = employees.filter((employee) => employee.role === "NURSE");
-  const activeRules = popularDayRules.filter(
-    (rule) => !(sundayMode === "closed" && rule.weekday === 0)
-      && !(sundayMode === "nurses_only" && rule.weekday === 0),
-  );
-  const requiredDoctors = Math.max(
-    minDoctors,
-    ...activeRules.map((rule) => rule.minDoctors),
-  );
-  const requiredNurses = Math.max(
-    minNurses,
-    ...activeRules.map((rule) => rule.minNurses),
-  );
-  if (
-    doctors.length < requiredDoctors ||
-    nurses.length < requiredNurses ||
-    activeRules.some(
-      (rule) =>
-        singleDoctorWeekdays.includes(rule.weekday) &&
-        rule.minDoctors > 1,
-    )
-  ) return [];
-  const targets = new Map(employees.map((employee) => [
-    employee.id,
-    targetHoursForMonth(employee.targetWeeklyHours, month, sundayMode, employee.role),
-  ]));
-  const targetDays = new Map(employees.map((employee) => [
-    employee.id,
-    targetDaysForMonth(employee.preferredDaysPerWeek ?? 5, month, sundayMode, employee.role),
-  ]));
-
-  return Array.from({length: candidateCount}, (_, index) => batch * candidateCount + index).map((offset) => {
-    const assignments: Assignment[] = [];
-    const hours = new Map<string, number>(employees.map((employee) => [employee.id, 0]));
-    const workDates = new Map<string, Set<string>>(
-      employees.map((employee) => [employee.id, new Set<string>()]),
-    );
-    const warnings: string[] = [];
-    let uncovered = 0;
-
-    monthDates(month).forEach((date, dayIndex) => {
-      if (sundayMode === "closed" && getDay(date) === 0) return;
-      const dateKey = format(date, "yyyy-MM-dd");
-      const nursesOnlySunday = sundayMode === "nurses_only" && getDay(date) === 0;
-      const popularRule = nursesOnlySunday
-        ? undefined
-        : activeRules.find((rule) => rule.weekday === getDay(date));
-      sessions.forEach((session, sessionIndex) => {
-        const popularShiftRule = popularRule?.sessions.includes(session.id)
-          ? popularRule
-          : undefined;
-        const assigned: Employee[] = [];
-        const assignRole = (pool: Employee[], count: number) => {
-          const available = pool
-            .filter((employee) => {
-              const employeeDates = workDates.get(employee.id) ?? new Set<string>();
-              const daysFromMonday = (getDay(date) + 6) % 7;
-              const currentWeek = format(addDays(date, -daysFromMonday), "yyyy-MM-dd");
-              const workedThisWeek = [...employeeDates].filter((workedDate) => {
-                const parsed = new Date(`${workedDate}T12:00:00`);
-                return format(addDays(parsed, -((getDay(parsed) + 6) % 7)), "yyyy-MM-dd") === currentWeek;
-              });
-              return (
-                !employeeUnavailableOn(employee, dateKey, getDay(date), session.id) &&
-                !(
-                  employee.daysPerWeekConstraintStrength === "ABSOLUTE" &&
-                  !employeeDates.has(dateKey) &&
-                  workedThisWeek.length >= (employee.preferredDaysPerWeek ?? 5)
-                ) &&
-                !assigned.some((coworker) => avoidances.some((pair) =>
-                  pair.strength !== "PREFERRED" &&
-                  (
-                    (pair.fromId === employee.id && pair.toId === coworker.id) ||
-                    (pair.toId === employee.id && pair.fromId === coworker.id)
-                  ),
-                ))
-              );
-            })
-            .sort((a, b) => {
-              if (a.backupOnly !== b.backupOnly) return a.backupOnly ? 1 : -1;
-              const preferredPenalty = (employee: Employee) =>
-                Number(
-                  employee.weekdayConstraintStrength === "PREFERRED" &&
-                  normalizeUnavailableShifts(employee).some((item) =>
-                    shiftBlocks(item, getDay(date), session.id),
-                  ),
-                ) +
-                assigned.filter((coworker) => avoidances.some((pair) =>
-                  pair.strength === "PREFERRED" &&
-                  (
-                    (pair.fromId === employee.id && pair.toId === coworker.id) ||
-                    (pair.toId === employee.id && pair.fromId === coworker.id)
-                  ),
-                )).length;
-              const penaltyDifference = preferredPenalty(a) - preferredPenalty(b);
-              if (penaltyDifference) return penaltyDifference;
-              const targetA = targets.get(a.id) ?? 0;
-              const targetB = targets.get(b.id) ?? 0;
-              const datesA = workDates.get(a.id) ?? new Set<string>();
-              const datesB = workDates.get(b.id) ?? new Set<string>();
-              const dayDistanceA = Math.abs(
-                datesA.size + Number(!datesA.has(dateKey)) - (targetDays.get(a.id) ?? 0),
-              );
-              const dayDistanceB = Math.abs(
-                datesB.size + Number(!datesB.has(dateKey)) - (targetDays.get(b.id) ?? 0),
-              );
-              return ((hours.get(a.id) ?? 0) - targetA) - ((hours.get(b.id) ?? 0) - targetB)
-                || dayDistanceA - dayDistanceB
-                || a.name.localeCompare(b.name);
-            });
-          for (let i = 0; i < count; i += 1) {
-            const employee = available[(dayIndex + sessionIndex + offset + i) % Math.max(available.length, 1)];
-            if (employee && !assigned.some((item) => item.id === employee.id)) {
-              assigned.push(employee);
-              hours.set(employee.id, (hours.get(employee.id) ?? 0) + session.hours);
-              workDates.get(employee.id)?.add(dateKey);
-            } else {
-              uncovered += 1;
-            }
-          }
-        };
-        assignRole(
-          doctors,
-          nursesOnlySunday
-            ? 0
-            : popularShiftRule?.minDoctors ??
-              (singleDoctorWeekdays.includes(getDay(date)) ? 1 : minDoctors),
-        );
-        assignRole(nurses, popularShiftRule?.minNurses ?? minNurses);
-        assignments.push({date: dateKey, session: session.id, employees: assigned});
-      });
-    });
-
-    const deviations = employees.map((employee) => {
-      const target = targets.get(employee.id) ?? 0;
-      return Math.abs((hours.get(employee.id) ?? 0) - target) / Math.max(target, 1);
-    });
-    const fairness = Math.max(0, Math.round(100 - (deviations.reduce((a, b) => a + b, 0) / deviations.length) * 100));
-    const coverage = Math.max(0, Math.round(100 - uncovered * 3));
-    const matched = preferences.filter((preference) => assignments.some((assignment) =>
-      assignment.employees.some((employee) => employee.id === preference.fromId)
-      && assignment.employees.some((employee) => employee.id === preference.toId),
-    )).length;
-    const preference = preferences.length ? Math.round((matched / preferences.length) * 100) - offset * 2 : 100;
-    if (uncovered) warnings.push(`${uncovered} session roles are not covered.`);
-
-    return {
-      id: `fallback-${batch}-${offset}`,
-      rank: offset + 1,
-      score: Math.round(coverage * .55 + fairness * .3 + preference * .15),
-      coverage,
-      fairness,
-      preference,
-      assignments,
-      warnings,
-    };
-  }).sort((a, b) => b.score - a.score).map((candidate, index) => ({...candidate, rank: index + 1}));
+function localCandidates(payload: unknown): Candidate[] {
+  const parsed = generateScheduleInputSchema.safeParse(payload);
+  if (!parsed.success) return [];
+  return buildGeneratedSchedule(parsed.data).candidates as Candidate[];
 }
 
 const CANDIDATE_BATCH_SIZE = 6;
@@ -339,6 +154,7 @@ export function ScheduleWizard() {
   const [minDoctors, setMinDoctors] = useState(1);
   const [maxDoctors, setMaxDoctors] = useState(2);
   const [minNurses, setMinNurses] = useState(1);
+  const [maxNurses, setMaxNurses] = useState(4);
   const [sundayMode, setSundayMode] = useState<SundayMode>("closed");
   const [dayOffSessions, setDayOffSessions] = useState<Session[]>([...SESSION_IDS]);
   const [settingPlans, setSettingPlans] = useState<Array<{id: string; name: string; payload: SettingPlanPayload; updatedAt: string}>>([]);
@@ -404,6 +220,7 @@ export function ScheduleWizard() {
     return colors;
   }, [scheduleStaff]);
   const effectiveMinNurses = scheduleMode === "DOCTOR_ONLY" ? 0 : minNurses;
+  const effectiveMaxNurses = scheduleMode === "DOCTOR_ONLY" ? 0 : Math.max(maxNurses, minNurses);
   const closedSundays = sundayMode === "closed";
   const activePopularDayRules = popularDayRules.filter(
     (rule) => !(sundayMode === "closed" && rule.weekday === 0)
@@ -412,6 +229,7 @@ export function ScheduleWizard() {
   const popularDayConflict = activePopularDayRules.some(
     (rule) =>
       rule.minDoctors > maxDoctors ||
+      rule.minNurses > effectiveMaxNurses ||
       (singleDoctorWeekdays.includes(rule.weekday) && rule.minDoctors > 1),
   );
   const singleDoctorCoverageConflict = singleDoctorWeekdays.some((weekday) => {
@@ -555,6 +373,7 @@ export function ScheduleWizard() {
       minDoctors,
       maxDoctors,
       minNurses,
+      maxNurses,
       singleDoctorWeekdays,
       popularDayRules,
       flex,
@@ -584,6 +403,7 @@ export function ScheduleWizard() {
     setMinDoctors(payload.minDoctors);
     setMaxDoctors(payload.maxDoctors);
     setMinNurses(payload.minNurses);
+    setMaxNurses(Math.max(payload.maxNurses, payload.minNurses));
     setSingleDoctorWeekdays(payload.singleDoctorWeekdays);
     setPopularDayRules(payload.popularDayRules);
     setFlex(payload.flex);
@@ -854,6 +674,17 @@ export function ScheduleWizard() {
             return assignment;
           }
         }
+        if (employee.role === "NURSE") {
+          const nurseCount = assignment.employees.filter(
+            (item) => item.role === "NURSE",
+          ).length;
+          if (nurseCount >= effectiveMaxNurses) {
+            warning = locale === "zh-TW"
+              ? `${date} ${session} 已達護理師人數上限。`
+              : `${date} ${session} is already at its nurse limit.`;
+            return assignment;
+          }
+        }
         return {...assignment, employees: [...assignment.employees, employee]};
       });
       return {
@@ -933,63 +764,39 @@ export function ScheduleWizard() {
       setSelectedRank(null);
       setPreviewIndex(0);
     }
+    const payload = {
+      mode: scheduleMode,
+      candidateCount: CANDIDATE_BATCH_SIZE,
+      batch,
+      month,
+      staff: scheduleStaff,
+      preferences: schedulePreferences,
+      avoidances,
+      minDoctors,
+      maxDoctors,
+      minNurses: effectiveMinNurses,
+      maxNurses: effectiveMaxNurses,
+      sundayMode,
+      closedSundays,
+      singleDoctorWeekdays,
+      popularDayRules,
+      flexible: flex,
+      attested,
+    };
     let generated: Candidate[] = [];
     try {
       const response = await fetch("/api/schedules/generate", {
         method: "POST",
         credentials: "same-origin",
         headers: {"content-type": "application/json"},
-        body: JSON.stringify({
-          mode: scheduleMode,
-          candidateCount: CANDIDATE_BATCH_SIZE,
-          batch,
-          month,
-          staff: scheduleStaff,
-          preferences: schedulePreferences,
-          avoidances,
-          minDoctors,
-          maxDoctors,
-          minNurses: effectiveMinNurses,
-          sundayMode,
-          closedSundays,
-          singleDoctorWeekdays,
-          popularDayRules,
-          flexible: flex,
-          attested,
-        }),
+        body: JSON.stringify(payload),
       });
       if (response.status === 401) setNeedsSignIn(true);
       const result = response.ok ? await response.json() : null;
       generated = result?.candidates as Candidate[] ?? [];
-      if (!response.ok) {
-        generated = makeCandidates(
-          scheduleStaff,
-          month,
-          minDoctors,
-          effectiveMinNurses,
-          sundayMode,
-          singleDoctorWeekdays,
-          popularDayRules,
-          schedulePreferences,
-          avoidances,
-          CANDIDATE_BATCH_SIZE,
-          batch,
-        );
-      }
+      if (!response.ok) generated = localCandidates(payload);
     } catch {
-      generated = makeCandidates(
-        scheduleStaff,
-        month,
-        minDoctors,
-        effectiveMinNurses,
-        sundayMode,
-        singleDoctorWeekdays,
-        popularDayRules,
-        schedulePreferences,
-        avoidances,
-        CANDIDATE_BATCH_SIZE,
-        batch,
-      );
+      generated = localCandidates(payload);
     }
     if (append) {
       const seen = new Set(candidates.map((candidate) => candidate.id));
@@ -1069,7 +876,7 @@ export function ScheduleWizard() {
           preferences: schedulePreferences,
           avoidances,
           aiSummary: aiSummary || undefined,
-          config: {minDoctors, maxDoctors, minNurses: effectiveMinNurses, sundayMode, closedSundays: sundayMode === "closed", singleDoctorWeekdays, popularDayRules, flex, attested},
+          config: {minDoctors, maxDoctors, minNurses: effectiveMinNurses, maxNurses: effectiveMaxNurses, sundayMode, closedSundays: sundayMode === "closed", singleDoctorWeekdays, popularDayRules, flex, attested},
           candidate: selected,
         }),
       });
@@ -1319,10 +1126,20 @@ export function ScheduleWizard() {
               )}
             </div>
             {scheduleMode === "DOCTOR_NURSE" && (
-              <div className="rule-card field">
-                <label htmlFor="nurses">{t("rules.minNurses")}</label>
-                <input id="nurses" type="number" min={1} max={10} value={minNurses} onChange={(event) => setMinNurses(Number(event.target.value))} />
-              </div>
+              <>
+                <div className="rule-card field">
+                  <label htmlFor="nurses">{t("rules.minNurses")}</label>
+                  <input id="nurses" type="number" min={1} max={10} value={minNurses} onChange={(event) => {
+                    const nextMinimum = Number(event.target.value);
+                    setMinNurses(nextMinimum);
+                    setMaxNurses((current) => Math.max(current, nextMinimum));
+                  }} />
+                </div>
+                <div className="rule-card field">
+                  <label htmlFor="max-nurses">{t("rules.maxNurses")}</label>
+                  <input id="max-nurses" type="number" min={minNurses} max={10} value={maxNurses} onChange={(event) => setMaxNurses(Math.max(minNurses, Number(event.target.value)))} />
+                </div>
+              </>
             )}
             <div className="rule-card wide">
               <strong>{t("rules.sundayMode")}</strong>
@@ -1441,7 +1258,7 @@ export function ScheduleWizard() {
                           <input
                             type="number"
                             min={1}
-                            max={10}
+                            max={maxNurses}
                             disabled={!rule || closed}
                             value={rule?.minNurses ?? minNurses}
                             onChange={(event) => setPopularDayRules((current) =>

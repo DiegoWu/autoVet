@@ -44,6 +44,11 @@ export function getSessionCookieName(): string {
   return isSecureCookie() ? "__Host-autovet" : "autovet_session";
 }
 
+export function isAuthConfigured(): boolean {
+  const secret = process.env.AUTH_SECRET;
+  return Boolean(secret && new TextEncoder().encode(secret).byteLength >= 32);
+}
+
 function getAuthSecret(): Uint8Array {
   const secret = process.env.AUTH_SECRET;
   if (!secret || new TextEncoder().encode(secret).byteLength < 32) {
@@ -204,7 +209,12 @@ export function readSessionToken(cookieHeader: string | null): string | null {
 }
 
 export async function requireSession(request: Request): Promise<UserSession | null> {
-  return verifyUserSession(readSessionToken(request.headers.get("cookie")));
+  const headerToken = readSessionToken(request.headers.get("cookie"));
+  if (headerToken) return verifyUserSession(headerToken);
+  const cookieGetter = (request as Request & {
+    cookies?: {get: (name: string) => {value: string} | undefined};
+  }).cookies;
+  return verifyUserSession(cookieGetter?.get(getSessionCookieName())?.value);
 }
 
 export function serializeSessionCookie(cookie: SessionCookie): string {

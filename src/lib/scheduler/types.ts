@@ -92,6 +92,7 @@ export interface SchedulerConfig {
   coverage: Coverage | CoverageRequirement[];
   maxDoctorsPerShift?: number;
   maxDoctorsPerShiftByDate?: Partial<Record<LocalDate, number>>;
+  maxNursesPerShift?: number;
   laborRules?: LaborRuleConfig;
   scoreWeights?: Partial<ScoreWeights>;
 }

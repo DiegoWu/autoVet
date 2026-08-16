@@ -1,7 +1,7 @@
 import createMiddleware from "next-intl/middleware";
 import {NextRequest, NextResponse} from "next/server";
 import {routing} from "./i18n/routing";
-import {getSessionCookieName, verifyUserSession} from "./lib/auth";
+import {getSessionCookieName, isAuthConfigured, verifyUserSession} from "./lib/auth";
 
 const intlMiddleware = createMiddleware(routing);
 
@@ -23,7 +23,7 @@ export default async function proxy(request: NextRequest) {
     return intlMiddleware(request);
   }
 
-  if (process.env.AUTH_SECRET) {
+  if (isAuthConfigured()) {
     const session = await verifyUserSession(request.cookies.get(getSessionCookieName())?.value);
     if (!session) {
       return NextResponse.redirect(new URL(`/${localeFromPath(pathname)}/login`, request.url));

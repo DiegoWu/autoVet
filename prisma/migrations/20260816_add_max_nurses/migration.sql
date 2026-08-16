@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Clinic" ADD COLUMN "maxNurses" INTEGER NOT NULL DEFAULT 4;

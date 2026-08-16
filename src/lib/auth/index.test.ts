@@ -1,5 +1,6 @@
 import {afterEach, describe, expect, it, vi} from "vitest";
 import {
+  isAuthConfigured,
   readSessionToken,
   requireSession,
   signUserSession,
@@ -18,6 +19,13 @@ const session = {
 };
 
 describe("user sessions", () => {
+  it("treats a missing or short AUTH_SECRET as unconfigured", () => {
+    vi.stubEnv("AUTH_SECRET", "");
+    expect(isAuthConfigured()).toBe(false);
+    vi.stubEnv("AUTH_SECRET", "a".repeat(32));
+    expect(isAuthConfigured()).toBe(true);
+  });
+
   it("rejects a request without a session cookie", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("AUTH_SECRET", "a".repeat(32));

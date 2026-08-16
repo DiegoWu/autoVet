@@ -17,6 +17,7 @@ async function main() {
       defaultLocale: "zh-TW",
       minDoctors: 1,
       minNurses: 1,
+      maxNurses: 4,
     },
   });
 

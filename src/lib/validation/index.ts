@@ -14,6 +14,7 @@ export const clinicSetupSchema = z
     minDoctors: z.int().min(0).max(100).default(1),
     maxDoctors: z.int().min(1).max(100).default(2),
     minNurses: z.int().min(0).max(100).default(1),
+    maxNurses: z.int().min(0).max(100).default(4),
     flexibleHoursMode: z.boolean().default(false),
     approvalAttested: z.boolean().default(false),
   })
@@ -21,6 +22,10 @@ export const clinicSetupSchema = z
   .refine((clinic) => clinic.maxDoctors >= clinic.minDoctors, {
     message: "maxDoctors cannot be less than minDoctors",
     path: ["maxDoctors"],
+  })
+  .refine((clinic) => clinic.maxNurses >= clinic.minNurses, {
+    message: "maxNurses cannot be less than minNurses",
+    path: ["maxNurses"],
   });
 
 export const availabilitySchema = z

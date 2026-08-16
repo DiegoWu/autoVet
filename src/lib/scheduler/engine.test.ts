@@ -191,6 +191,50 @@ describe("deterministic candidate generation", () => {
     ).toBe(true);
   });
 
+  it("never exceeds the configured maximum nurses per shift", () => {
+    const nurses: Employee[] = ["n1", "n2", "n3"].map((id) => ({
+      id,
+      name: id,
+      role: "nurse",
+      targetHoursPerWeek: 16,
+    }));
+    const cappedConfig: SchedulerConfig = {
+      startDate: "2026-08-10",
+      endDate: "2026-08-11",
+      seed: "nurse-cap",
+      coverage: {doctors: 0, nurses: 1},
+      maxNursesPerShift: 2,
+    };
+    const candidate = generateScheduleCandidates(nurses, [], cappedConfig).candidates[0]!;
+
+    for (const date of ["2026-08-10", "2026-08-11"]) {
+      for (const session of ["morning", "afternoon", "evening"] as const) {
+        expect(
+          candidate.assignments.filter(
+            (assignment) =>
+              assignment.role === "nurse" &&
+              assignment.date === date &&
+              assignment.session === session,
+          ).length,
+        ).toBeLessThanOrEqual(2);
+      }
+    }
+  });
+
+  it("rejects minimum nurse coverage above the nurse cap", () => {
+    const issues = validateSchedulerInput(employees, [], {
+      startDate: "2026-08-10",
+      endDate: "2026-08-11",
+      seed: "nurse-cap-conflict",
+      coverage: {doctors: 1, nurses: 3},
+      maxNursesPerShift: 2,
+    });
+
+    expect(
+      issues.some((issue) => issue.code === "NURSE_MINIMUM_EXCEEDS_MAXIMUM"),
+    ).toBe(true);
+  });
+
   it("never exceeds the configured maximum doctors per shift", () => {
     const doctors: Employee[] = ["d1", "d2", "d3"].map((id) => ({
       id,
@@ -607,6 +651,282 @@ describe("hard constraints and labor boundaries", () => {
         (issue) => issue.code === "REST_DAY_REQUIRED" && issue.severity === "error",
       ),
     ).toBe(true);
+  });
+});
+
+describe("hour-aware staffing and weekly templates", () => {
+  const fourDoctors: Employee[] = ["d1", "d2", "d3", "d4"].map((id, index) => ({
+    id,
+    name: `Dr ${index + 1}`,
+    role: "doctor" as const,
+    targetHoursPerWeek: 40,
+  }));
+  const fourNurses: Employee[] = ["n1", "n2", "n3", "n4"].map((id, index) => ({
+    id,
+    name: `Nurse ${index + 1}`,
+    role: "nurse" as const,
+    targetHoursPerWeek: 40,
+  }));
+
+  function weekdayCoverage(
+    startDate: string,
+    endDate: string,
+    coverage: { doctors: number; nurses: number },
+  ) {
+    const requirements: SchedulerConfig["coverage"] = [];
+    for (
+      let time = Date.parse(`${startDate}T00:00:00.000Z`);
+      time <= Date.parse(`${endDate}T00:00:00.000Z`);
+      time += 86_400_000
+    ) {
+      const date = new Date(time).toISOString().slice(0, 10);
+      const sunday = new Date(time).getUTCDay() === 0;
+      requirements.push({
+        date,
+        doctors: sunday ? 0 : coverage.doctors,
+        nurses: sunday ? 0 : coverage.nurses,
+      });
+    }
+    return requirements;
+  }
+
+  function staffOnShift(
+    assignments: Assignment[],
+    date: string,
+    session: Assignment["session"],
+    role: Assignment["role"],
+  ) {
+    return assignments
+      .filter(
+        (assignment) =>
+          assignment.date === date &&
+          assignment.session === session &&
+          assignment.role === role,
+      )
+      .map((assignment) => assignment.employeeId)
+      .sort();
+  }
+
+  it("covers Sunday nurse-only shifts for three 40-hour nurses", {timeout: 30_000}, () => {
+    const threeNurses: Employee[] = ["n1", "n2", "n3"].map((id, index) => ({
+      id,
+      name: `Nurse ${index + 1}`,
+      role: "nurse",
+      targetHoursPerWeek: 40,
+    }));
+    const coverage: SchedulerConfig["coverage"] = [];
+    for (
+      let time = Date.parse("2026-08-01T00:00:00.000Z");
+      time <= Date.parse("2026-08-31T00:00:00.000Z");
+      time += 86_400_000
+    ) {
+      const date = new Date(time).toISOString().slice(0, 10);
+      const sunday = new Date(time).getUTCDay() === 0;
+      coverage.push({
+        date,
+        doctors: sunday ? 0 : 1,
+        nurses: 1,
+      });
+    }
+    const result = generateScheduleCandidates(
+      [...fourDoctors, ...threeNurses],
+      [],
+      {
+        startDate: "2026-08-01",
+        endDate: "2026-08-31",
+        seed: "sunday-nurses-only",
+        candidateCount: 3,
+        coverage,
+        maxDoctorsPerShift: 2,
+        maxNursesPerShift: 4,
+      },
+    );
+    expect(result.impossible).toBeUndefined();
+    const candidate = result.candidates[0]!;
+    expect(candidate).toBeDefined();
+    for (const date of ["2026-08-02", "2026-08-09", "2026-08-16", "2026-08-23", "2026-08-30"]) {
+      for (const session of ["morning", "afternoon", "evening"] as const) {
+        expect(
+          staffOnShift(candidate.assignments, date, session, "nurse").length,
+        ).toBeGreaterThanOrEqual(1);
+        expect(
+          staffOnShift(candidate.assignments, date, session, "doctor").length,
+        ).toBe(0);
+      }
+    }
+    expect(
+      validateSchedule(
+        candidate.assignments,
+        [...fourDoctors, ...threeNurses],
+        [],
+        {
+          startDate: "2026-08-01",
+          endDate: "2026-08-31",
+          seed: "sunday-nurses-only",
+          coverage,
+          maxDoctorsPerShift: 2,
+          maxNursesPerShift: 4,
+        },
+      ).filter((issue) => issue.severity === "error"),
+    ).toEqual([]);
+  });
+
+  it("raises doctor headcount toward the max so weekly targets are approached", () => {
+    const hourConfig: SchedulerConfig = {
+      startDate: "2026-08-10",
+      endDate: "2026-08-15",
+      seed: "hour-aware-doctors",
+      candidateCount: 3,
+      coverage: { doctors: 1, nurses: 0 },
+      maxDoctorsPerShift: 2,
+    };
+    const result = generateScheduleCandidates(fourDoctors, [], hourConfig);
+    const candidate = result.candidates[0]!;
+    expect(candidate).toBeDefined();
+
+    const sessions = ["morning", "afternoon", "evening"] as const;
+    const dates = [
+      "2026-08-10",
+      "2026-08-11",
+      "2026-08-12",
+      "2026-08-13",
+      "2026-08-14",
+      "2026-08-15",
+    ];
+    const doubleStaffed = dates.flatMap((date) =>
+      sessions.map((session) =>
+        staffOnShift(candidate.assignments, date, session, "doctor").length,
+      ),
+    );
+    expect(doubleStaffed.every((count) => count <= 2)).toBe(true);
+    expect(doubleStaffed.filter((count) => count === 2).length).toBeGreaterThanOrEqual(12);
+
+    const share = 126 / 4;
+    for (const doctor of fourDoctors) {
+      const hours = candidate.assignments
+        .filter((assignment) => assignment.employeeId === doctor.id)
+        .reduce((total, assignment) => total + assignment.hours, 0);
+      expect(hours).toBeGreaterThanOrEqual(share - 8);
+    }
+    expect(
+      candidate.warnings.some((issue) => issue.code === "STAFFING_CAP_BELOW_TARGETS"),
+    ).toBe(true);
+    expect(
+      validateSchedule(candidate.assignments, fourDoctors, [], hourConfig).filter(
+        (issue) => issue.severity === "error",
+      ),
+    ).toEqual([]);
+  });
+
+  it("repeats the same weekday and session roster across two full weeks", () => {
+    const twoWeekConfig: SchedulerConfig = {
+      startDate: "2026-08-10",
+      endDate: "2026-08-22",
+      seed: "weekly-template-doctors",
+      candidateCount: 3,
+      coverage: weekdayCoverage("2026-08-10", "2026-08-22", { doctors: 1, nurses: 0 }),
+      maxDoctorsPerShift: 2,
+    };
+    const candidate = generateScheduleCandidates(fourDoctors, [], twoWeekConfig).candidates[0]!;
+    const sessions = ["morning", "afternoon", "evening"] as const;
+    let matches = 0;
+    let compared = 0;
+    for (const offset of [0, 1, 2, 3, 4, 5]) {
+      const week1 = `2026-08-${String(10 + offset).padStart(2, "0")}`;
+      const week2 = `2026-08-${String(17 + offset).padStart(2, "0")}`;
+      for (const session of sessions) {
+        const first = staffOnShift(candidate.assignments, week1, session, "doctor");
+        const second = staffOnShift(candidate.assignments, week2, session, "doctor");
+        compared += 1;
+        if (first.join("|") === second.join("|") && first.length > 0) matches += 1;
+      }
+    }
+    expect(matches / compared).toBeGreaterThanOrEqual(0.7);
+  });
+
+  it("repairs only the time-off holes when copying a weekly template", () => {
+    const twoWeekConfig: SchedulerConfig = {
+      startDate: "2026-08-10",
+      endDate: "2026-08-22",
+      seed: "weekly-template-timeoff",
+      candidateCount: 3,
+      coverage: weekdayCoverage("2026-08-10", "2026-08-22", { doctors: 1, nurses: 0 }),
+      maxDoctorsPerShift: 2,
+    };
+    const timeOff = [
+      { employeeId: "d1", date: "2026-08-17", kind: "day-off" as const },
+    ];
+    const candidate = generateScheduleCandidates(
+      fourDoctors,
+      timeOff,
+      twoWeekConfig,
+    ).candidates[0]!;
+
+    expect(
+      candidate.assignments.some(
+        (assignment) => assignment.employeeId === "d1" && assignment.date === "2026-08-17",
+      ),
+    ).toBe(false);
+    expect(
+      staffOnShift(candidate.assignments, "2026-08-17", "morning", "doctor").length,
+    ).toBeGreaterThanOrEqual(1);
+
+    const sessions = ["morning", "afternoon", "evening"] as const;
+    let intactMatches = 0;
+    let intactCompared = 0;
+    for (const offset of [1, 2, 3, 4, 5]) {
+      const week1 = `2026-08-${String(10 + offset).padStart(2, "0")}`;
+      const week2 = `2026-08-${String(17 + offset).padStart(2, "0")}`;
+      for (const session of sessions) {
+        const first = staffOnShift(candidate.assignments, week1, session, "doctor");
+        const second = staffOnShift(candidate.assignments, week2, session, "doctor");
+        intactCompared += 1;
+        if (first.join("|") === second.join("|") && first.length > 0) intactMatches += 1;
+      }
+    }
+    expect(intactMatches / intactCompared).toBeGreaterThanOrEqual(0.7);
+    expect(
+      validateSchedule(candidate.assignments, fourDoctors, timeOff, twoWeekConfig).filter(
+        (issue) => issue.severity === "error",
+      ),
+    ).toEqual([]);
+  });
+
+  it("overstaffs nurses toward targets and repeats the weekly pattern", () => {
+    const nurseConfig: SchedulerConfig = {
+      startDate: "2026-08-10",
+      endDate: "2026-08-22",
+      seed: "weekly-template-nurses",
+      candidateCount: 3,
+      coverage: weekdayCoverage("2026-08-10", "2026-08-22", { doctors: 0, nurses: 1 }),
+    };
+    const candidate = generateScheduleCandidates(fourNurses, [], nurseConfig).candidates[0]!;
+    const week1Hours = fourNurses.map((nurse) =>
+      candidate.assignments
+        .filter(
+          (assignment) =>
+            assignment.employeeId === nurse.id &&
+            assignment.date >= "2026-08-10" &&
+            assignment.date <= "2026-08-15",
+        )
+        .reduce((total, assignment) => total + assignment.hours, 0),
+    );
+    expect(week1Hours.every((hours) => hours >= 24)).toBe(true);
+
+    const sessions = ["morning", "afternoon", "evening"] as const;
+    let matches = 0;
+    let compared = 0;
+    for (const offset of [0, 1, 2, 3, 4, 5]) {
+      const week1 = `2026-08-${String(10 + offset).padStart(2, "0")}`;
+      const week2 = `2026-08-${String(17 + offset).padStart(2, "0")}`;
+      for (const session of sessions) {
+        const first = staffOnShift(candidate.assignments, week1, session, "nurse");
+        const second = staffOnShift(candidate.assignments, week2, session, "nurse");
+        compared += 1;
+        if (first.join("|") === second.join("|") && first.length > 0) matches += 1;
+      }
+    }
+    expect(matches / compared).toBeGreaterThanOrEqual(0.7);
   });
 });
 
