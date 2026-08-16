@@ -4,6 +4,19 @@ import {useEffect, useMemo, useRef, useState} from "react";
 import {addDays, endOfMonth, format, getDay, startOfMonth} from "date-fns";
 import {Check, ChevronLeft, ChevronRight, Download, FileImage, FileText, PawPrint, Plus, Sparkles, Trash2} from "lucide-react";
 import {useLocale, useTranslations} from "next-intl";
+import {Link} from "@/i18n/navigation";
+import {
+  dayOffBlocks,
+  isWholeDay,
+  normalizeDaysOff,
+  normalizeUnavailableShifts,
+  SESSION_IDS,
+  shiftBlocks,
+  type DayOffEntry,
+  type SundayMode,
+  type UnavailableShift,
+} from "@/lib/schedule-constraints";
+import type {SettingPlanPayload} from "@/lib/setting-plan";
 
 type Role = "DOCTOR" | "NURSE";
 type StaffRole = Role | "BACKUP_DOCTOR";
@@ -25,8 +38,9 @@ type Employee = {
   yearsExperience?: number;
   expertise?: string;
   hobbies?: string;
-  daysOff: string[];
+  daysOff: DayOffEntry[];
   unavailableWeekdays?: number[];
+  unavailableShifts?: UnavailableShift[];
   preferredDaysPerWeek?: number;
   weekdayConstraintStrength?: ConstraintStrength;
   daysPerWeekConstraintStrength?: ConstraintStrength;
@@ -75,14 +89,22 @@ function monthDates(month: string) {
   return dates;
 }
 
+function countsTowardTarget(date: Date, sundayMode: SundayMode, role?: Role) {
+  if (getDay(date) !== 0) return true;
+  if (sundayMode === "closed") return false;
+  if (sundayMode === "nurses_only" && role === "DOCTOR") return false;
+  return true;
+}
+
 function targetHoursForMonth(
   preferredWeeklyHours: number,
   month: string,
-  closedSundays: boolean,
+  sundayMode: SundayMode,
+  role?: Role,
 ) {
   const daysByWeek = new Map<string, number>();
   for (const date of monthDates(month)) {
-    if (closedSundays && getDay(date) === 0) continue;
+    if (!countsTowardTarget(date, sundayMode, role)) continue;
     const daysFromMonday = (getDay(date) + 6) % 7;
     const week = format(addDays(date, -daysFromMonday), "yyyy-MM-dd");
     daysByWeek.set(week, (daysByWeek.get(week) ?? 0) + 1);
@@ -96,11 +118,12 @@ function targetHoursForMonth(
 function targetDaysForMonth(
   preferredDaysPerWeek: number,
   month: string,
-  closedSundays: boolean,
+  sundayMode: SundayMode,
+  role?: Role,
 ) {
   const daysByWeek = new Map<string, number>();
   for (const date of monthDates(month)) {
-    if (closedSundays && getDay(date) === 0) continue;
+    if (!countsTowardTarget(date, sundayMode, role)) continue;
     const daysFromMonday = (getDay(date) + 6) % 7;
     const week = format(addDays(date, -daysFromMonday), "yyyy-MM-dd");
     daysByWeek.set(week, (daysByWeek.get(week) ?? 0) + 1);
@@ -111,12 +134,27 @@ function targetDaysForMonth(
   );
 }
 
+function employeeUnavailableOn(
+  employee: Employee,
+  dateKey: string,
+  weekday: number,
+  session: Session,
+) {
+  const daysOff = normalizeDaysOff(employee.daysOff);
+  const shifts = normalizeUnavailableShifts(employee);
+  return daysOff.some((entry) => dayOffBlocks(entry, dateKey, session))
+    || (
+      employee.weekdayConstraintStrength !== "PREFERRED"
+      && shifts.some((item) => shiftBlocks(item, weekday, session))
+    );
+}
+
 function makeCandidates(
   employees: Employee[],
   month: string,
   minDoctors: number,
   minNurses: number,
-  closedSundays: boolean,
+  sundayMode: SundayMode,
   singleDoctorWeekdays: number[],
   popularDayRules: PopularDayRule[],
   preferences: Preference[],
@@ -127,7 +165,8 @@ function makeCandidates(
   const doctors = employees.filter((employee) => employee.role === "DOCTOR");
   const nurses = employees.filter((employee) => employee.role === "NURSE");
   const activeRules = popularDayRules.filter(
-    (rule) => !(closedSundays && rule.weekday === 0),
+    (rule) => !(sundayMode === "closed" && rule.weekday === 0)
+      && !(sundayMode === "nurses_only" && rule.weekday === 0),
   );
   const requiredDoctors = Math.max(
     minDoctors,
@@ -148,11 +187,11 @@ function makeCandidates(
   ) return [];
   const targets = new Map(employees.map((employee) => [
     employee.id,
-    targetHoursForMonth(employee.targetWeeklyHours, month, closedSundays),
+    targetHoursForMonth(employee.targetWeeklyHours, month, sundayMode, employee.role),
   ]));
   const targetDays = new Map(employees.map((employee) => [
     employee.id,
-    targetDaysForMonth(employee.preferredDaysPerWeek ?? 5, month, closedSundays),
+    targetDaysForMonth(employee.preferredDaysPerWeek ?? 5, month, sundayMode, employee.role),
   ]));
 
   return Array.from({length: candidateCount}, (_, index) => batch * candidateCount + index).map((offset) => {
@@ -165,11 +204,12 @@ function makeCandidates(
     let uncovered = 0;
 
     monthDates(month).forEach((date, dayIndex) => {
-      if (closedSundays && getDay(date) === 0) return;
+      if (sundayMode === "closed" && getDay(date) === 0) return;
       const dateKey = format(date, "yyyy-MM-dd");
-      const popularRule = activeRules.find(
-        (rule) => rule.weekday === getDay(date),
-      );
+      const nursesOnlySunday = sundayMode === "nurses_only" && getDay(date) === 0;
+      const popularRule = nursesOnlySunday
+        ? undefined
+        : activeRules.find((rule) => rule.weekday === getDay(date));
       sessions.forEach((session, sessionIndex) => {
         const popularShiftRule = popularRule?.sessions.includes(session.id)
           ? popularRule
@@ -186,11 +226,7 @@ function makeCandidates(
                 return format(addDays(parsed, -((getDay(parsed) + 6) % 7)), "yyyy-MM-dd") === currentWeek;
               });
               return (
-                !employee.daysOff.includes(dateKey) &&
-                !(
-                  employee.weekdayConstraintStrength !== "PREFERRED" &&
-                  employee.unavailableWeekdays?.includes(getDay(date))
-                ) &&
+                !employeeUnavailableOn(employee, dateKey, getDay(date), session.id) &&
                 !(
                   employee.daysPerWeekConstraintStrength === "ABSOLUTE" &&
                   !employeeDates.has(dateKey) &&
@@ -210,7 +246,9 @@ function makeCandidates(
               const preferredPenalty = (employee: Employee) =>
                 Number(
                   employee.weekdayConstraintStrength === "PREFERRED" &&
-                  employee.unavailableWeekdays?.includes(getDay(date)),
+                  normalizeUnavailableShifts(employee).some((item) =>
+                    shiftBlocks(item, getDay(date), session.id),
+                  ),
                 ) +
                 assigned.filter((coworker) => avoidances.some((pair) =>
                   pair.strength === "PREFERRED" &&
@@ -248,8 +286,10 @@ function makeCandidates(
         };
         assignRole(
           doctors,
-          popularShiftRule?.minDoctors ??
-            (singleDoctorWeekdays.includes(getDay(date)) ? 1 : minDoctors),
+          nursesOnlySunday
+            ? 0
+            : popularShiftRule?.minDoctors ??
+              (singleDoctorWeekdays.includes(getDay(date)) ? 1 : minDoctors),
         );
         assignRole(nurses, popularShiftRule?.minNurses ?? minNurses);
         assignments.push({date: dateKey, session: session.id, employees: assigned});
@@ -299,7 +339,14 @@ export function ScheduleWizard() {
   const [minDoctors, setMinDoctors] = useState(1);
   const [maxDoctors, setMaxDoctors] = useState(2);
   const [minNurses, setMinNurses] = useState(1);
-  const [closedSundays, setClosedSundays] = useState(true);
+  const [sundayMode, setSundayMode] = useState<SundayMode>("closed");
+  const [dayOffSessions, setDayOffSessions] = useState<Session[]>([...SESSION_IDS]);
+  const [settingPlans, setSettingPlans] = useState<Array<{id: string; name: string; payload: SettingPlanPayload; updatedAt: string}>>([]);
+  const [selectedPlanId, setSelectedPlanId] = useState("");
+  const [planName, setPlanName] = useState("");
+  const [planBusy, setPlanBusy] = useState(false);
+  const [planMessage, setPlanMessage] = useState("");
+  const [needsSignIn, setNeedsSignIn] = useState(false);
   const [singleDoctorWeekdays, setSingleDoctorWeekdays] = useState<number[]>([]);
   const [popularDayRules, setPopularDayRules] = useState<PopularDayRule[]>([]);
   const [flex, setFlex] = useState(false);
@@ -357,8 +404,10 @@ export function ScheduleWizard() {
     return colors;
   }, [scheduleStaff]);
   const effectiveMinNurses = scheduleMode === "DOCTOR_ONLY" ? 0 : minNurses;
+  const closedSundays = sundayMode === "closed";
   const activePopularDayRules = popularDayRules.filter(
-    (rule) => !(closedSundays && rule.weekday === 0),
+    (rule) => !(sundayMode === "closed" && rule.weekday === 0)
+      && !(sundayMode === "nurses_only" && rule.weekday === 0),
   );
   const popularDayConflict = activePopularDayRules.some(
     (rule) =>
@@ -366,7 +415,7 @@ export function ScheduleWizard() {
       (singleDoctorWeekdays.includes(rule.weekday) && rule.minDoctors > 1),
   );
   const singleDoctorCoverageConflict = singleDoctorWeekdays.some((weekday) => {
-    if (closedSundays && weekday === 0) return false;
+    if (sundayMode !== "open" && weekday === 0) return false;
     const popularRule = popularDayRules.find((rule) => rule.weekday === weekday);
     return (popularRule?.minDoctors ?? minDoctors) > 1;
   });
@@ -376,7 +425,11 @@ export function ScheduleWizard() {
     if (stored) {
       try {
         const parsed = JSON.parse(stored) as Employee[];
-        queueMicrotask(() => setStaff(parsed));
+        queueMicrotask(() => setStaff(parsed.map((employee) => ({
+          ...employee,
+          daysOff: normalizeDaysOff(employee.daysOff),
+          unavailableShifts: normalizeUnavailableShifts(employee),
+        }))));
       } catch { /* Ignore corrupt local fallback. */ }
     }
   }, []);
@@ -399,6 +452,24 @@ export function ScheduleWizard() {
   useEffect(() => {
     localStorage.setItem("autovet.avoidances", JSON.stringify(avoidances));
   }, [avoidances]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/setting-plans", {credentials: "same-origin"})
+      .then((response) => {
+        if (response.status === 401 && !cancelled) setNeedsSignIn(true);
+        return response.ok ? response.json() : [];
+      })
+      .then((plans) => {
+        if (!cancelled) setSettingPlans(plans);
+      })
+      .catch(() => {
+        if (!cancelled) setSettingPlans([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (step !== 3 || !selected) return;
@@ -457,7 +528,7 @@ export function ScheduleWizard() {
 
   function updateEmployee(
     employeeId: string,
-    updates: Partial<Pick<Employee, "name" | "targetWeeklyHours" | "role" | "backupOnly" | "unavailableWeekdays" | "preferredDaysPerWeek" | "weekdayConstraintStrength" | "daysPerWeekConstraintStrength">>,
+    updates: Partial<Pick<Employee, "name" | "targetWeeklyHours" | "role" | "backupOnly" | "unavailableShifts" | "preferredDaysPerWeek" | "weekdayConstraintStrength" | "daysPerWeekConstraintStrength">>,
   ) {
     setStaff((current) => current.map((employee) =>
       employee.id === employeeId ? {...employee, ...updates} : employee,
@@ -465,13 +536,153 @@ export function ScheduleWizard() {
   }
 
   function addDayOff() {
-    if (!dayOffEmployee || !dayOffDate) return;
-    setStaff((current) => current.map((employee) =>
-      employee.id === dayOffEmployee && !employee.daysOff.includes(dayOffDate)
-        ? {...employee, daysOff: [...employee.daysOff, dayOffDate]}
-        : employee,
-    ));
+    if (!dayOffEmployee || !dayOffDate || dayOffSessions.length === 0) return;
+    const sessions = [...dayOffSessions];
+    setStaff((current) => current.map((employee) => {
+      if (employee.id !== dayOffEmployee) return employee;
+      const daysOff = normalizeDaysOff(employee.daysOff);
+      if (daysOff.some((entry) => entry.date === dayOffDate && entry.sessions.join() === sessions.join())) {
+        return employee;
+      }
+      return {...employee, daysOff: [...daysOff, {date: dayOffDate, sessions}]};
+    }));
     setDayOffDate("");
+  }
+
+  function currentSettingPayload(): SettingPlanPayload {
+    return {
+      sundayMode,
+      minDoctors,
+      maxDoctors,
+      minNurses,
+      singleDoctorWeekdays,
+      popularDayRules,
+      flex,
+      attested,
+      preferences: schedulePreferences.map((preference) => ({
+        fromId: preference.fromId,
+        toId: preference.toId,
+      })),
+      avoidances: avoidances.map((pair) => ({
+        fromId: pair.fromId,
+        toId: pair.toId,
+        strength: pair.strength ?? "ABSOLUTE",
+      })),
+      employees: scheduleStaff.map((employee) => ({
+        id: employee.id,
+        daysOff: normalizeDaysOff(employee.daysOff),
+        unavailableShifts: normalizeUnavailableShifts(employee),
+        preferredDaysPerWeek: employee.preferredDaysPerWeek ?? 5,
+        weekdayConstraintStrength: employee.weekdayConstraintStrength ?? "ABSOLUTE",
+        daysPerWeekConstraintStrength: employee.daysPerWeekConstraintStrength ?? "PREFERRED",
+      })),
+    };
+  }
+
+  function applySettingPayload(payload: SettingPlanPayload) {
+    setSundayMode(payload.sundayMode);
+    setMinDoctors(payload.minDoctors);
+    setMaxDoctors(payload.maxDoctors);
+    setMinNurses(payload.minNurses);
+    setSingleDoctorWeekdays(payload.singleDoctorWeekdays);
+    setPopularDayRules(payload.popularDayRules);
+    setFlex(payload.flex);
+    setAttested(payload.attested);
+    setPreferences(payload.preferences);
+    setAvoidances(payload.avoidances);
+    const monthPrefix = `${month}-`;
+    const byId = new Map(payload.employees.map((employee) => [employee.id, employee]));
+    setStaff((current) => current.map((employee) => {
+      const saved = byId.get(employee.id);
+      if (!saved) return employee;
+      return {
+        ...employee,
+        daysOff: normalizeDaysOff(saved.daysOff).filter((entry) => entry.date.startsWith(monthPrefix)),
+        unavailableShifts: saved.unavailableShifts,
+        preferredDaysPerWeek: saved.preferredDaysPerWeek,
+        weekdayConstraintStrength: saved.weekdayConstraintStrength,
+        daysPerWeekConstraintStrength: saved.daysPerWeekConstraintStrength,
+      };
+    }));
+  }
+
+  async function refreshSettingPlans() {
+    try {
+      const response = await fetch("/api/setting-plans", {credentials: "same-origin"});
+      if (!response.ok) return;
+      const plans = await response.json() as typeof settingPlans;
+      setSettingPlans(plans);
+    } catch {
+      setSettingPlans([]);
+    }
+  }
+
+  async function saveSettingPlan(asNew: boolean) {
+    const name = asNew ? planName.trim() : (settingPlans.find((plan) => plan.id === selectedPlanId)?.name ?? planName.trim());
+    if (!name) {
+      setPlanMessage(locale === "zh-TW" ? "請輸入方案名稱。" : "Enter a plan name.");
+      return;
+    }
+    setPlanBusy(true);
+    setPlanMessage("");
+    try {
+      const response = asNew || !selectedPlanId
+        ? await fetch("/api/setting-plans", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: {"content-type": "application/json"},
+          body: JSON.stringify({name, payload: currentSettingPayload()}),
+        })
+        : await fetch(`/api/setting-plans/${selectedPlanId}`, {
+          method: "PUT",
+          credentials: "same-origin",
+          headers: {"content-type": "application/json"},
+          body: JSON.stringify({payload: currentSettingPayload()}),
+        });
+      if (response.status === 409) {
+        setPlanMessage(locale === "zh-TW" ? "這個名稱已經存在。" : "A plan with this name already exists.");
+        return;
+      }
+      if (!response.ok) {
+        setPlanMessage(locale === "zh-TW" ? "無法儲存方案。" : "Could not save the plan.");
+        return;
+      }
+      const plan = await response.json() as (typeof settingPlans)[number];
+      await refreshSettingPlans();
+      setSelectedPlanId(plan.id);
+      setPlanName("");
+      setPlanMessage(locale === "zh-TW" ? "方案已儲存。" : "Plan saved.");
+    } catch {
+      setPlanMessage(locale === "zh-TW" ? "無法儲存方案。" : "Could not save the plan.");
+    } finally {
+      setPlanBusy(false);
+    }
+  }
+
+  function loadSettingPlan() {
+    const plan = settingPlans.find((item) => item.id === selectedPlanId);
+    if (!plan) return;
+    applySettingPayload(plan.payload);
+    setPlanMessage(locale === "zh-TW" ? "已套用方案。" : "Plan loaded.");
+  }
+
+  async function deleteSettingPlan() {
+    if (!selectedPlanId) return;
+    setPlanBusy(true);
+    try {
+      const response = await fetch(`/api/setting-plans/${selectedPlanId}`, {method: "DELETE"});
+      if (!response.ok) {
+        setPlanMessage(locale === "zh-TW" ? "無法刪除方案。" : "Could not delete the plan.");
+        return;
+      }
+      setSelectedPlanId("");
+      await refreshSettingPlans();
+      setPlanMessage(locale === "zh-TW" ? "方案已刪除。" : "Plan deleted.");
+    } catch {
+      setPlanMessage(locale === "zh-TW" ? "無法刪除方案。" : "Could not delete the plan.");
+    } finally {
+      setPlanBusy(false);
+    }
   }
 
   function cycleAssignment(date: string, session: Session, employeeId: string) {
@@ -490,10 +701,10 @@ export function ScheduleWizard() {
           "yyyy-MM-dd",
         ) === weekStart;
       };
-      const openDaysInWeek = monthDates(month).filter(
+      const openDaysFor = (role: Role) => monthDates(month).filter(
         (day) =>
           isInClickedWeek(format(day, "yyyy-MM-dd")) &&
-          !(closedSundays && getDay(day) === 0),
+          countsTowardTarget(day, sundayMode, role),
       ).length;
       const workedDates = (id: string) => new Set(
         candidate.assignments
@@ -505,6 +716,7 @@ export function ScheduleWizard() {
         if (assignment.date !== date || assignment.session !== session) return assignment;
         const currentEmployee = assignment.employees.find((employee) => employee.id === employeeId);
         if (!currentEmployee) return assignment;
+        const openDaysInWeek = openDaysFor(currentEmployee.role);
         const currentRequiredDays = Math.min(
           currentEmployee.preferredDaysPerWeek ?? 5,
           openDaysInWeek,
@@ -526,10 +738,7 @@ export function ScheduleWizard() {
         const replacement = [...pool.slice(index + 1), ...pool.slice(0, index)]
           .find((employee) =>
             employee.id !== employeeId &&
-            !(
-              employee.weekdayConstraintStrength !== "PREFERRED" &&
-              employee.unavailableWeekdays?.includes(weekday)
-            ) &&
+            !employeeUnavailableOn(employee, date, weekday, session) &&
             !(
               employee.daysPerWeekConstraintStrength === "ABSOLUTE" &&
               !workedDates(employee.id).has(date) &&
@@ -550,7 +759,9 @@ export function ScheduleWizard() {
             !assignment.employees.some((assigned) => assigned.id === employee.id),
           );
         if (!replacement || replacement.id === employeeId) return assignment;
-        if (replacement.daysOff.includes(date)) warning = `${replacement.name}: requested day off ${date}`;
+        if (employeeUnavailableOn(replacement, date, weekday, session)) {
+          warning = `${replacement.name}: requested day off ${date}`;
+        }
         return {...assignment, employees: assignment.employees.map((employee) => employee.id === employeeId ? replacement : employee)};
       });
       return {...candidate, assignments, warnings: warning ? [...candidate.warnings, warning] : candidate.warnings};
@@ -607,13 +818,13 @@ export function ScheduleWizard() {
         if (assignment.date !== date || assignment.session !== session) return assignment;
         if (assignment.employees.some((item) => item.id === employee.id)) return assignment;
         const weekday = getDay(new Date(`${date}T12:00:00`));
-        if (
-          employee.daysOff.includes(date) ||
-          (
-            employee.weekdayConstraintStrength !== "PREFERRED" &&
-            employee.unavailableWeekdays?.includes(weekday)
-          )
-        ) {
+        if (sundayMode === "nurses_only" && weekday === 0 && employee.role === "DOCTOR") {
+          warning = locale === "zh-TW"
+            ? "週日不安排醫師。"
+            : "Doctors are not scheduled on Sunday.";
+          return assignment;
+        }
+        if (employeeUnavailableOn(employee, date, weekday, session)) {
           warning = locale === "zh-TW"
             ? `${employee.name} 在 ${date} 無法出勤。`
             : `${employee.name} is unavailable on ${date}.`;
@@ -726,6 +937,7 @@ export function ScheduleWizard() {
     try {
       const response = await fetch("/api/schedules/generate", {
         method: "POST",
+        credentials: "same-origin",
         headers: {"content-type": "application/json"},
         body: JSON.stringify({
           mode: scheduleMode,
@@ -738,6 +950,7 @@ export function ScheduleWizard() {
           minDoctors,
           maxDoctors,
           minNurses: effectiveMinNurses,
+          sundayMode,
           closedSundays,
           singleDoctorWeekdays,
           popularDayRules,
@@ -745,15 +958,31 @@ export function ScheduleWizard() {
           attested,
         }),
       });
-      const result = await response.json();
-      generated = response.ok ? result.candidates as Candidate[] : [];
+      if (response.status === 401) setNeedsSignIn(true);
+      const result = response.ok ? await response.json() : null;
+      generated = result?.candidates as Candidate[] ?? [];
+      if (!response.ok) {
+        generated = makeCandidates(
+          scheduleStaff,
+          month,
+          minDoctors,
+          effectiveMinNurses,
+          sundayMode,
+          singleDoctorWeekdays,
+          popularDayRules,
+          schedulePreferences,
+          avoidances,
+          CANDIDATE_BATCH_SIZE,
+          batch,
+        );
+      }
     } catch {
       generated = makeCandidates(
         scheduleStaff,
         month,
         minDoctors,
         effectiveMinNurses,
-        closedSundays,
+        sundayMode,
         singleDoctorWeekdays,
         popularDayRules,
         schedulePreferences,
@@ -825,7 +1054,7 @@ export function ScheduleWizard() {
 
   async function saveSchedule() {
     if (!selected) return;
-    const record = {id: crypto.randomUUID(), mode: scheduleMode, month, closedSundays, status: "SELECTED", staff: scheduleStaff.map((item) => item.name), selected, savedAt: new Date().toISOString()};
+    const record = {id: crypto.randomUUID(), mode: scheduleMode, month, closedSundays: sundayMode === "closed", status: "SELECTED", staff: scheduleStaff.map((item) => item.name), selected, savedAt: new Date().toISOString()};
     const prior = JSON.parse(localStorage.getItem("autovet.history") ?? "[]") as unknown[];
     localStorage.setItem("autovet.history", JSON.stringify([record, ...prior]));
     try {
@@ -840,7 +1069,7 @@ export function ScheduleWizard() {
           preferences: schedulePreferences,
           avoidances,
           aiSummary: aiSummary || undefined,
-          config: {minDoctors, maxDoctors, minNurses: effectiveMinNurses, closedSundays, singleDoctorWeekdays, popularDayRules, flex, attested},
+          config: {minDoctors, maxDoctors, minNurses: effectiveMinNurses, sundayMode, closedSundays: sundayMode === "closed", singleDoctorWeekdays, popularDayRules, flex, attested},
           candidate: selected,
         }),
       });
@@ -1009,8 +1238,39 @@ export function ScheduleWizard() {
 
       {step === 1 && (
         <section className="panel">
-          <div className="panel-head"><div><h2>{t("rules.title")}</h2><p className="hint">{locale === "zh-TW" ? "固定早、午、晚三診；週日可設為休診。" : "Three fixed sessions each day, with optional Sunday closure."}</p></div></div>
+          <div className="panel-head"><div><h2>{t("rules.title")}</h2><p className="hint">{t("rules.stepHint")}</p></div></div>
           <div className="rules-grid">
+            <details className="rule-card wide" open>
+              <summary className="accordion-summary">
+                <span><strong>{t("rules.plansGroup")}</strong><span className="hint">{t("rules.plansGroupHelp")}</span></span>
+              </summary>
+              <div className="staff-form" style={{marginTop: 16, gridTemplateColumns: "1fr 1fr auto auto auto auto"}}>
+                <div className="field">
+                  <label htmlFor="setting-plan">{t("rules.savedPlans")}</label>
+                  <select id="setting-plan" value={selectedPlanId} onChange={(event) => setSelectedPlanId(event.target.value)}>
+                    <option value="">{t("common.select")}</option>
+                    {settingPlans.map((plan) => <option value={plan.id} key={plan.id}>{plan.name}</option>)}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="setting-plan-name">{t("rules.planName")}</label>
+                  <input id="setting-plan-name" value={planName} onChange={(event) => setPlanName(event.target.value)} placeholder={t("rules.planName")} />
+                </div>
+                <button className="button secondary" type="button" disabled={planBusy || !selectedPlanId} onClick={loadSettingPlan}>{t("rules.loadPlan")}</button>
+                <button className="button secondary" type="button" disabled={planBusy || !selectedPlanId} onClick={() => void saveSettingPlan(false)}>{t("rules.savePlan")}</button>
+                <button className="button secondary" type="button" disabled={planBusy} onClick={() => void saveSettingPlan(true)}>{t("rules.savePlanAs")}</button>
+                <button className="button ghost" type="button" disabled={planBusy || !selectedPlanId} onClick={() => void deleteSettingPlan()}><Trash2 size={15} />{t("rules.deletePlan")}</button>
+              </div>
+              {needsSignIn && (
+                <p className="hint" style={{marginTop: 10}}>
+                  {t("rules.plansSignIn")}{" "}
+                  <Link href="/login">{t("rules.signIn")}</Link>
+                  {" · "}
+                  <Link href="/signup">{t("rules.signUp")}</Link>
+                </p>
+              )}
+              {planMessage && <p className="hint" style={{marginTop: 10}}>{planMessage}</p>}
+            </details>
             <details className="rule-card wide">
               <summary className="accordion-summary">
                 <span><strong>{t("rules.coverageGroup")}</strong><span className="hint">{t("rules.coverageGroupHelp")}</span></span>
@@ -1064,9 +1324,22 @@ export function ScheduleWizard() {
                 <input id="nurses" type="number" min={1} max={10} value={minNurses} onChange={(event) => setMinNurses(Number(event.target.value))} />
               </div>
             )}
-            <div className="rule-card switch-row">
-              <div><strong>{t("rules.closedSundays")}</strong><p className="hint">Sunday / 週日</p></div>
-              <input className="check" type="checkbox" checked={closedSundays} onChange={(event) => setClosedSundays(event.target.checked)} />
+            <div className="rule-card wide">
+              <strong>{t("rules.sundayMode")}</strong>
+              <p className="hint" style={{marginTop: 5}}>{t("rules.sundayModeHelp")}</p>
+              <div style={{display: "flex", gap: 16, flexWrap: "wrap", marginTop: 12}}>
+                {(["closed", "nurses_only", "open"] as const).map((mode) => (
+                  <label key={mode} style={{display: "flex", alignItems: "center", gap: 7, cursor: "pointer"}}>
+                    <input
+                      type="radio"
+                      name="sunday-mode"
+                      checked={sundayMode === mode}
+                      onChange={() => setSundayMode(mode)}
+                    />
+                    {t(`rules.sunday.${mode}`)}
+                  </label>
+                ))}
+              </div>
             </div>
               </div>
             </details>
@@ -1098,7 +1371,7 @@ export function ScheduleWizard() {
                   const rule = popularDayRules.find(
                     (item) => item.weekday === weekday.value,
                   );
-                  const closed = closedSundays && weekday.value === 0;
+                  const closed = sundayMode === "closed" && weekday.value === 0;
                   return (
                     <div className="popular-day-row" key={weekday.value}>
                       <label className="role-tag" style={{display: "flex", alignItems: "center", gap: 7, cursor: "pointer"}}>
@@ -1194,28 +1467,30 @@ export function ScheduleWizard() {
               <div style={{marginTop: 16}}>
             <div>
               <strong>{t("rules.doctorWeeklyPreferences")}</strong>
-              <p className="hint" style={{marginTop: 5}}>{t("rules.doctorWeeklyPreferencesHelp")}</p>
+              <p className="hint" style={{marginTop: 5}}>{t("rules.weeklyPreferencesHelp")}</p>
               <div style={{display: "grid", gap: 12, marginTop: 14}}>
-                {scheduleStaff.filter((employee) => employee.role === "DOCTOR").map((doctor) => (
-                  <div key={doctor.id} style={{borderTop: "1px solid var(--line)", paddingTop: 12}}>
+                {scheduleStaff.map((employee) => {
+                  const shifts = normalizeUnavailableShifts(employee);
+                  return (
+                  <div key={employee.id} style={{borderTop: "1px solid var(--line)", paddingTop: 12}}>
                     <div style={{display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap"}}>
-                      <strong>{doctor.name}</strong>
+                      <strong>{employee.name}</strong>
                       <label className="field" style={{display: "flex", alignItems: "center", gap: 8}}>
                         <span>{t("rules.preferredDaysPerWeek")}</span>
                         <input
                           type="number"
                           min={1}
                           max={7}
-                          value={doctor.preferredDaysPerWeek ?? 5}
-                          onChange={(event) => updateEmployee(doctor.id, {
+                          value={employee.preferredDaysPerWeek ?? 5}
+                          onChange={(event) => updateEmployee(employee.id, {
                             preferredDaysPerWeek: Math.min(7, Math.max(1, Number(event.target.value) || 1)),
                           })}
                           style={{width: 70}}
                         />
                         <select
                           aria-label={t("rules.constraintStrength")}
-                          value={doctor.daysPerWeekConstraintStrength ?? "PREFERRED"}
-                          onChange={(event) => updateEmployee(doctor.id, {
+                          value={employee.daysPerWeekConstraintStrength ?? "PREFERRED"}
+                          onChange={(event) => updateEmployee(employee.id, {
                             daysPerWeekConstraintStrength: event.target.value as ConstraintStrength,
                           })}
                           style={{width: "auto"}}
@@ -1229,8 +1504,8 @@ export function ScheduleWizard() {
                       <span>{t("rules.unavailableWeekdayStrength")}</span>
                       <select
                         aria-label={t("rules.unavailableWeekdayStrength")}
-                        value={doctor.weekdayConstraintStrength ?? "ABSOLUTE"}
-                        onChange={(event) => updateEmployee(doctor.id, {
+                        value={employee.weekdayConstraintStrength ?? "ABSOLUTE"}
+                        onChange={(event) => updateEmployee(employee.id, {
                           weekdayConstraintStrength: event.target.value as ConstraintStrength,
                         })}
                         style={{width: "auto"}}
@@ -1239,27 +1514,41 @@ export function ScheduleWizard() {
                         <option value="PREFERRED">{t("rules.preferred")}</option>
                       </select>
                     </label>
-                    <div style={{display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10}}>
+                    <div style={{display: "grid", gap: 8, marginTop: 10}}>
                       {weekdays.map((weekday) => {
-                        const checked = doctor.unavailableWeekdays?.includes(weekday.value) ?? false;
+                        const current = shifts.find((item) => item.weekday === weekday.value)?.sessions ?? [];
                         return (
-                          <label className="role-tag" key={weekday.value} style={{display: "flex", alignItems: "center", gap: 6, cursor: "pointer"}}>
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => updateEmployee(doctor.id, {
-                                unavailableWeekdays: checked
-                                  ? doctor.unavailableWeekdays?.filter((day) => day !== weekday.value)
-                                  : [...(doctor.unavailableWeekdays ?? []), weekday.value],
-                              })}
-                            />
-                            {t(`weekdays.${weekday.key}`)}
-                          </label>
+                          <div key={weekday.value} style={{display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap"}}>
+                            <strong style={{minWidth: 72}}>{t(`weekdays.${weekday.key}`)}</strong>
+                            {sessions.map((session) => {
+                              const checked = current.includes(session.id);
+                              return (
+                                <label className="role-tag" key={session.id} style={{display: "flex", alignItems: "center", gap: 6, cursor: "pointer"}}>
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => {
+                                      const nextSessions = checked
+                                        ? current.filter((item) => item !== session.id)
+                                        : [...current, session.id];
+                                      const nextShifts = [
+                                        ...shifts.filter((item) => item.weekday !== weekday.value),
+                                        ...(nextSessions.length ? [{weekday: weekday.value, sessions: nextSessions}] : []),
+                                      ];
+                                      updateEmployee(employee.id, {unavailableShifts: nextShifts});
+                                    }}
+                                  />
+                                  {t(`schedule.${session.id}`)}
+                                </label>
+                              );
+                            })}
+                          </div>
                         );
                       })}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
               </div>
@@ -1333,10 +1622,39 @@ export function ScheduleWizard() {
                 </div>
                 <button className="button secondary" type="button" onClick={addDayOff}><Plus size={15} />{locale === "zh-TW" ? "加入" : "Add"}</button>
               </div>
+              <div style={{display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10}}>
+                {sessions.map((session) => {
+                  const checked = dayOffSessions.includes(session.id);
+                  return (
+                    <label className="role-tag" key={session.id} style={{display: "flex", alignItems: "center", gap: 6, cursor: "pointer"}}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => setDayOffSessions((current) =>
+                          checked ? current.filter((item) => item !== session.id) : [...current, session.id],
+                        )}
+                      />
+                      {t(`schedule.${session.id}`)}
+                    </label>
+                  );
+                })}
+              </div>
               <div style={{display: "flex", gap: 7, flexWrap: "wrap"}}>
-                {scheduleStaff.flatMap((employee) => employee.daysOff.map((date) => (
-                  <button className="role-tag" style={{border: 0}} key={`${employee.id}-${date}`} onClick={() => setStaff((current) => current.map((item) => item.id === employee.id ? {...item, daysOff: item.daysOff.filter((itemDate) => itemDate !== date)} : item))}>
-                    {employee.name} · {date} ×
+                {scheduleStaff.flatMap((employee) => normalizeDaysOff(employee.daysOff).map((entry) => (
+                  <button
+                    className="role-tag"
+                    style={{border: 0}}
+                    key={`${employee.id}-${entry.date}-${entry.sessions.join("-")}`}
+                    onClick={() => setStaff((current) => current.map((item) => item.id === employee.id
+                      ? {
+                        ...item,
+                        daysOff: normalizeDaysOff(item.daysOff).filter((off) =>
+                          !(off.date === entry.date && off.sessions.join() === entry.sessions.join()),
+                        ),
+                      }
+                      : item))}
+                  >
+                    {employee.name} · {entry.date} · {isWholeDay(entry.sessions) ? t("rules.wholeDay") : entry.sessions.map((session) => t(`schedule.${session}`)).join("/")} ×
                   </button>
                 )))}
               </div>
@@ -1417,7 +1735,7 @@ export function ScheduleWizard() {
                 <ScheduleGrid
                   candidate={previewed}
                   month={month}
-                  closedSundays={closedSundays}
+                  sundayMode={sundayMode}
                   doctorColors={doctorColors}
                   highlightedEmployeeId={highlightedEmployeeId}
                   onHighlight={setHighlightedEmployeeId}
@@ -1459,7 +1777,7 @@ export function ScheduleWizard() {
             <ScheduleGrid
               candidate={selected}
               month={month}
-              closedSundays={closedSundays}
+              sundayMode={sundayMode}
               doctorColors={doctorColors}
               highlightedEmployeeId={highlightedEmployeeId}
               onHighlight={setHighlightedEmployeeId}
@@ -1503,7 +1821,7 @@ export function ScheduleWizard() {
 function ScheduleGrid({
   candidate,
   month,
-  closedSundays,
+  sundayMode,
   doctorColors,
   highlightedEmployeeId,
   onHighlight,
@@ -1516,7 +1834,7 @@ function ScheduleGrid({
 }: {
   candidate: Candidate;
   month: string;
-  closedSundays: boolean;
+  sundayMode: SundayMode;
   doctorColors: Map<string, {backgroundColor: string; borderColor: string; color: string}>;
   highlightedEmployeeId: string | null;
   onHighlight: (employeeId: string) => void;
@@ -1602,7 +1920,7 @@ function ScheduleGrid({
           <table className="schedule" style={{marginBottom: 13}}>
           <thead><tr><th>autoVet</th>{week.map((date) => {
             const outsideMonth = format(date, "yyyy-MM") !== month;
-            const closed = closedSundays && getDay(date) === 0;
+            const closed = sundayMode === "closed" && getDay(date) === 0;
             const draggable = Boolean(onSwapDays && !outsideMonth && !closed);
             const dateKey = format(date, "yyyy-MM-dd");
             return (
@@ -1637,7 +1955,8 @@ function ScheduleGrid({
                 {week.map((date) => {
                   const dateKey = format(date, "yyyy-MM-dd");
                   const outsideMonth = format(date, "yyyy-MM") !== month;
-                  const closed = closedSundays && getDay(date) === 0;
+                  const closed = sundayMode === "closed" && getDay(date) === 0;
+                  const nursesOnlySunday = sundayMode === "nurses_only" && getDay(date) === 0;
                   const assignment = candidate.assignments.find((item) => item.date === dateKey && item.session === session.id);
                   return outsideMonth ? <td className="closed" key={dateKey}>—</td> : closed ? <td className="closed" key={dateKey}>{t("closed")}</td> : (
                     <td key={dateKey}>{assignment?.employees.map((employee) => {
@@ -1692,7 +2011,10 @@ function ScheduleGrid({
                       >
                         <option value="">{t("addStaff")}</option>
                         {editableStaff
-                          .filter((employee) => !assignment?.employees.some((assigned) => assigned.id === employee.id))
+                          .filter((employee) =>
+                            !assignment?.employees.some((assigned) => assigned.id === employee.id)
+                            && !(nursesOnlySunday && employee.role === "DOCTOR"),
+                          )
                           .map((employee) => <option value={employee.id} key={employee.id}>{employee.name}</option>)}
                       </select>
                     )}</td>

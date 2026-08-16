@@ -3,6 +3,14 @@ import {z} from "zod";
 import {addDays, endOfMonth, format, getDay, startOfMonth} from "date-fns";
 import {generateScheduleCandidates, type CoverageRequirement, type SessionId} from "@/lib/scheduler";
 import {requireSession} from "@/lib/auth";
+import {
+  normalizeDaysOff,
+  normalizeUnavailableShifts,
+  resolveSundayMode,
+  SESSION_IDS,
+  staffConstraintFields,
+  sundayConfigFields,
+} from "@/lib/schedule-constraints";
 
 const InputSchema = z.object({
   mode: z.enum(["DOCTOR_ONLY", "DOCTOR_NURSE"]).default("DOCTOR_NURSE"),
@@ -15,11 +23,7 @@ const InputSchema = z.object({
     role: z.enum(["DOCTOR", "NURSE"]),
     backupOnly: z.boolean().default(false),
     targetWeeklyHours: z.number(),
-    daysOff: z.array(z.string()).default([]),
-    unavailableWeekdays: z.array(z.number().int().min(0).max(6)).default([]),
-    preferredDaysPerWeek: z.number().int().min(1).max(7).default(5),
-    weekdayConstraintStrength: z.enum(["ABSOLUTE", "PREFERRED"]).default("ABSOLUTE"),
-    daysPerWeekConstraintStrength: z.enum(["ABSOLUTE", "PREFERRED"]).default("PREFERRED"),
+    ...staffConstraintFields,
   })),
   preferences: z.array(z.object({fromId: z.string(), toId: z.string()})).default([]),
   avoidances: z.array(z.object({
@@ -30,7 +34,7 @@ const InputSchema = z.object({
   minDoctors: z.number().int().min(1),
   maxDoctors: z.number().int().min(1),
   minNurses: z.number().int().min(0),
-  closedSundays: z.boolean(),
+  ...sundayConfigFields,
   singleDoctorWeekdays: z.array(z.number().int().min(0).max(6)).default([]),
   popularDayRules: z.array(z.object({
     weekday: z.number().int().min(0).max(6),
@@ -74,7 +78,7 @@ const InputSchema = z.object({
       });
     }
     seenPopularWeekdays.add(rule.weekday);
-    if (input.closedSundays && rule.weekday === 0) continue;
+    if (resolveSundayMode(input) !== "open" && rule.weekday === 0) continue;
     if (rule.minDoctors > input.maxDoctors) {
       context.addIssue({
         code: "custom",
@@ -101,7 +105,7 @@ const InputSchema = z.object({
     }
   }
   for (const weekday of input.singleDoctorWeekdays) {
-    if (input.closedSundays && weekday === 0) continue;
+    if (resolveSundayMode(input) !== "open" && weekday === 0) continue;
     const doctorMinimum = input.popularDayRules.find(
       (rule) => rule.weekday === weekday,
     )?.minDoctors ?? input.minDoctors;
@@ -115,7 +119,7 @@ const InputSchema = z.object({
   }
 });
 
-const sessionIds: SessionId[] = ["morning", "afternoon", "evening"];
+const sessionIds: SessionId[] = [...SESSION_IDS];
 
 export async function POST(request: Request) {
   if (!await requireSession(request)) {
@@ -141,17 +145,20 @@ export async function POST(request: Request) {
       pair.fromId !== pair.toId,
   );
 
+  const sundayMode = resolveSundayMode(input);
   const first = startOfMonth(new Date(`${input.month}-01T12:00:00`));
   const last = endOfMonth(first);
   const coverage: CoverageRequirement[] = [];
   const maxDoctorsPerShiftByDate: Record<string, number> = {};
   for (let date = first; date <= last; date = addDays(date, 1)) {
-    if (input.closedSundays && getDay(date) === 0) continue;
+    const weekday = getDay(date);
+    if (sundayMode === "closed" && weekday === 0) continue;
     const dateKey = format(date, "yyyy-MM-dd");
-    const popularRule = input.popularDayRules.find(
-      (rule) => rule.weekday === getDay(date),
-    );
-    if (input.singleDoctorWeekdays.includes(getDay(date))) {
+    const nursesOnlySunday = sundayMode === "nurses_only" && weekday === 0;
+    const popularRule = nursesOnlySunday
+      ? undefined
+      : input.popularDayRules.find((rule) => rule.weekday === weekday);
+    if (!nursesOnlySunday && input.singleDoctorWeekdays.includes(weekday)) {
       maxDoctorsPerShiftByDate[dateKey] = 1;
     }
     for (const session of sessionIds) {
@@ -161,7 +168,7 @@ export async function POST(request: Request) {
       coverage.push({
         date: dateKey,
         session,
-        doctors: popularShiftRule?.minDoctors ?? input.minDoctors,
+        doctors: nursesOnlySunday ? 0 : (popularShiftRule?.minDoctors ?? input.minDoctors),
         nurses: input.mode === "DOCTOR_ONLY"
           ? 0
           : (popularShiftRule?.minNurses ?? input.minNurses),
@@ -204,36 +211,44 @@ export async function POST(request: Request) {
         ),
         avoidedDates: employee.weekdayConstraintStrength === "PREFERRED"
           ? [...new Set(coverage
-            .filter((requirement) =>
-              requirement.date &&
-              employee.unavailableWeekdays.includes(
-                getDay(new Date(`${requirement.date}T12:00:00`)),
-              ),
-            )
+            .filter((requirement) => {
+              if (!requirement.date) return false;
+              const weekday = getDay(new Date(`${requirement.date}T12:00:00`));
+              const shifts = normalizeUnavailableShifts(employee);
+              const dayShifts = shifts.find((item) => item.weekday === weekday);
+              return Boolean(dayShifts && dayShifts.sessions.length === SESSION_IDS.length);
+            })
             .map((requirement) => requirement.date!)
           )]
           : [],
       },
     })),
     activeStaff.flatMap((employee) => {
-      const recurringDaysOff: Array<{employeeId: string; date: string; kind: "unavailable"}> = [];
+      const daysOff = normalizeDaysOff(employee.daysOff);
+      const shifts = normalizeUnavailableShifts(employee);
+      const recurringDaysOff: Array<{
+        employeeId: string;
+        date: string;
+        kind: "unavailable";
+        sessions: SessionId[];
+      }> = [];
       for (let date = first; date <= last; date = addDays(date, 1)) {
-        if (
-          employee.weekdayConstraintStrength === "ABSOLUTE" &&
-          employee.unavailableWeekdays.includes(getDay(date))
-        ) {
+        const dayShifts = shifts.find((item) => item.weekday === getDay(date));
+        if (employee.weekdayConstraintStrength === "ABSOLUTE" && dayShifts) {
           recurringDaysOff.push({
             employeeId: employee.id,
             date: format(date, "yyyy-MM-dd"),
             kind: "unavailable",
+            sessions: dayShifts.sessions,
           });
         }
       }
       return [
-        ...employee.daysOff.map((date) => ({
+        ...daysOff.map((entry) => ({
           employeeId: employee.id,
-          date,
+          date: entry.date,
           kind: "day-off" as const,
+          sessions: entry.sessions,
         })),
         ...recurringDaysOff,
       ];

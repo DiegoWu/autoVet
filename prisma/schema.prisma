@@ -40,8 +40,22 @@ model Clinic {
   users             User[]
   employees         Employee[]
   scheduleRuns      ScheduleRun[]
+  settingPlans      SettingPlan[]
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
+}
+
+model SettingPlan {
+  id        String   @id @default(cuid())
+  clinicId  String
+  clinic    Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  name      String
+  payload   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([clinicId, name])
+  @@index([clinicId])
 }
 
 model User {

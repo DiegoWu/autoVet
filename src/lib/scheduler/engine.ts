@@ -25,6 +25,22 @@ import {
 
 const SESSION_IDS = Object.keys(SESSIONS) as SessionId[];
 const ROLES: EmployeeRole[] = ["doctor", "nurse"];
+
+function timeOffSessions(item: TimeOff): SessionId[] {
+  if (!item.sessions || item.sessions.length === 0) return SESSION_IDS;
+  if (SESSION_IDS.every((session) => item.sessions!.includes(session))) return SESSION_IDS;
+  return item.sessions;
+}
+
+function unavailableKeys(timeOff: TimeOff[]): Set<string> {
+  const keys = new Set<string>();
+  for (const item of timeOff) {
+    for (const session of timeOffSessions(item)) {
+      keys.add(`${item.employeeId}|${item.date}|${session}`);
+    }
+  }
+  return keys;
+}
 const DEFAULT_WEIGHTS: ScoreWeights = {
   coworkerPreference: 5,
   targetHourCloseness: 10,
@@ -455,7 +471,7 @@ function runAttempt(
 ): Attempt {
   const random = randomFactory(`${String(config.seed)}:${attemptNumber}`);
   const assignments: Assignment[] = [];
-  const unavailable = new Set(timeOff.map((item) => `${item.employeeId}|${item.date}`));
+  const unavailable = unavailableKeys(timeOff);
   const activeEmployees = employees.filter((employee) => employee.active !== false);
   const weeklyTargets = buildWeeklyTargets(activeEmployees, slots);
   const weeklyDayTargets = buildWeeklyDayTargets(activeEmployees, slots);
@@ -464,11 +480,11 @@ function runAttempt(
   const orderedSlots = [...slots].sort((left, right) => {
     const leftPool = activeEmployees.filter(
       (employee) =>
-        employee.role === left.role && !unavailable.has(`${employee.id}|${left.date}`),
+        employee.role === left.role && !unavailable.has(`${employee.id}|${left.date}|${left.session}`),
     ).length;
     const rightPool = activeEmployees.filter(
       (employee) =>
-        employee.role === right.role && !unavailable.has(`${employee.id}|${right.date}`),
+        employee.role === right.role && !unavailable.has(`${employee.id}|${right.date}|${right.session}`),
     ).length;
     return (
       leftPool - left.required - (rightPool - right.required) ||
@@ -490,7 +506,7 @@ function runAttempt(
         .filter(
           (employee) =>
             employee.role === slot.role &&
-            !unavailable.has(`${employee.id}|${slot.date}`) &&
+            !unavailable.has(`${employee.id}|${slot.date}|${slot.session}`) &&
             !assignments.some(
               (assignment) =>
                 assignment.employeeId === employee.id &&
@@ -640,7 +656,7 @@ function runAttempt(
               (slot) =>
                 slot.role === employee.role &&
                 weekKey(slot.date) === week &&
-                !unavailable.has(`${employee.id}|${slot.date}`) &&
+                !unavailable.has(`${employee.id}|${slot.date}|${slot.session}`) &&
                 !(
                   employee.role === "doctor" &&
                 maxDoctorsForDate(config, slot.date) !== undefined &&
@@ -917,7 +933,7 @@ export function validateSchedule(
   const issues = validateLaborRules(assignments, employees, config.laborRules);
   const dates = enumerateDates(config.startDate, config.endDate);
   const slots = buildSlots(dates, config);
-  const unavailable = new Set(timeOff.map((item) => `${item.employeeId}|${item.date}`));
+  const unavailable = unavailableKeys(timeOff);
   const assignmentKeys = new Set<string>();
   const byEmployeeId = new Map(employees.map((employee) => [employee.id, employee]));
   const reportedAvoidedPairs = new Set<string>();
@@ -934,7 +950,7 @@ export function validateSchedule(
       });
     }
     assignmentKeys.add(assignmentKey);
-    if (unavailable.has(`${assignment.employeeId}|${assignment.date}`)) {
+    if (unavailable.has(`${assignment.employeeId}|${assignment.date}|${assignment.session}`)) {
       issues.push({
         severity: "error",
         code: "ASSIGNED_DURING_TIME_OFF",

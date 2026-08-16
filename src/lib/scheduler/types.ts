@@ -40,6 +40,8 @@ export interface TimeOff {
   date: LocalDate;
   kind: "unavailable" | "day-off";
   reason?: string;
+  /** When omitted, empty, or all three sessions, the whole day is blocked. */
+  sessions?: SessionId[];
 }
 
 export interface Coverage {

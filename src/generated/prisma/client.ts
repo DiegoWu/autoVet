@@ -47,6 +47,11 @@ export { Prisma }
  */
 export type Clinic = Prisma.ClinicModel
 /**
+ * Model SettingPlan
+ * 
+ */
+export type SettingPlan = Prisma.SettingPlanModel
+/**
  * Model User
  * 
  */

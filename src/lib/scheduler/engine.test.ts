@@ -629,6 +629,55 @@ describe("infeasibility reporting", () => {
     expect(result.issues.some((issue) => issue.code === "IMPOSSIBLE_COVERAGE")).toBe(true);
   });
 
+  it("blocks only the listed sessions for partial-day leave", () => {
+    const result = generateScheduleCandidates(
+      employees,
+      [{ employeeId: "d1", date: "2026-08-10", kind: "day-off", sessions: ["evening"] }],
+      config,
+    );
+    const candidate = result.candidates[0]!;
+    expect(candidate.assignments.some(
+      (assignment) =>
+        assignment.employeeId === "d1" &&
+        assignment.date === "2026-08-10" &&
+        assignment.session === "evening",
+    )).toBe(false);
+    expect(candidate.assignments.some(
+      (assignment) =>
+        assignment.employeeId === "d1" &&
+        assignment.date === "2026-08-10" &&
+        assignment.session !== "evening",
+    )).toBe(true);
+  });
+
+  it("keeps whole-day leave blocking every session", () => {
+    const result = generateScheduleCandidates(
+      employees,
+      [{ employeeId: "d1", date: "2026-08-10", kind: "day-off" }],
+      config,
+    );
+    expect(result.candidates[0]!.assignments.some(
+      (assignment) => assignment.employeeId === "d1" && assignment.date === "2026-08-10",
+    )).toBe(false);
+  });
+
+  it("assigns only nurses when Sunday doctor coverage is zero", () => {
+    const result = generateScheduleCandidates(employees, [], {
+      startDate: "2026-08-16",
+      endDate: "2026-08-16",
+      seed: "sunday-nurses",
+      coverage: [
+        { date: "2026-08-16", session: "morning", doctors: 0, nurses: 1 },
+        { date: "2026-08-16", session: "afternoon", doctors: 0, nurses: 1 },
+        { date: "2026-08-16", session: "evening", doctors: 0, nurses: 1 },
+      ],
+    });
+    const assignments = result.candidates[0]!.assignments;
+    expect(assignments.length).toBeGreaterThan(0);
+    expect(assignments.every((assignment) => assignment.role === "nurse")).toBe(true);
+    expect(assignments.some((assignment) => assignment.role === "doctor")).toBe(false);
+  });
+
   it("reports invalid ranges without attempting generation", () => {
     const result = generateScheduleCandidates(employees, [], {
       ...config,

@@ -398,6 +398,7 @@ type FieldRefInputType<Model, FieldType> = Model extends never ? never : FieldRe
 
 export const ModelName = {
   Clinic: 'Clinic',
+  SettingPlan: 'SettingPlan',
   User: 'User',
   Employee: 'Employee',
   CoworkerPreference: 'CoworkerPreference',
@@ -421,7 +422,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "clinic" | "user" | "employee" | "coworkerPreference" | "availability" | "scheduleRun" | "candidate" | "assignment" | "aiSummary"
+    modelProps: "clinic" | "settingPlan" | "user" | "employee" | "coworkerPreference" | "availability" | "scheduleRun" | "candidate" | "assignment" | "aiSummary"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -496,6 +497,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         count: {
           args: Prisma.ClinicCountArgs<ExtArgs>
           result: runtime.Types.Utils.Optional<Prisma.ClinicCountAggregateOutputType> | number
+        }
+      }
+    }
+    SettingPlan: {
+      payload: Prisma.$SettingPlanPayload<ExtArgs>
+      fields: Prisma.SettingPlanFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.SettingPlanFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SettingPlanPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.SettingPlanFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SettingPlanPayload>
+        }
+        findFirst: {
+          args: Prisma.SettingPlanFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SettingPlanPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.SettingPlanFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SettingPlanPayload>
+        }
+        findMany: {
+          args: Prisma.SettingPlanFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SettingPlanPayload>[]
+        }
+        create: {
+          args: Prisma.SettingPlanCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SettingPlanPayload>
+        }
+        createMany: {
+          args: Prisma.SettingPlanCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.SettingPlanCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SettingPlanPayload>[]
+        }
+        delete: {
+          args: Prisma.SettingPlanDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SettingPlanPayload>
+        }
+        update: {
+          args: Prisma.SettingPlanUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SettingPlanPayload>
+        }
+        deleteMany: {
+          args: Prisma.SettingPlanDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.SettingPlanUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.SettingPlanUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SettingPlanPayload>[]
+        }
+        upsert: {
+          args: Prisma.SettingPlanUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$SettingPlanPayload>
+        }
+        aggregate: {
+          args: Prisma.SettingPlanAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateSettingPlan>
+        }
+        groupBy: {
+          args: Prisma.SettingPlanGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.SettingPlanGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.SettingPlanCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.SettingPlanCountAggregateOutputType> | number
         }
       }
     }
@@ -1146,6 +1221,18 @@ export const ClinicScalarFieldEnum = {
 export type ClinicScalarFieldEnum = (typeof ClinicScalarFieldEnum)[keyof typeof ClinicScalarFieldEnum]
 
 
+export const SettingPlanScalarFieldEnum = {
+  id: 'id',
+  clinicId: 'clinicId',
+  name: 'name',
+  payload: 'payload',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type SettingPlanScalarFieldEnum = (typeof SettingPlanScalarFieldEnum)[keyof typeof SettingPlanScalarFieldEnum]
+
+
 export const UserScalarFieldEnum = {
   id: 'id',
   email: 'email',
@@ -1267,19 +1354,19 @@ export const SortOrder = {
 export type SortOrder = (typeof SortOrder)[keyof typeof SortOrder]
 
 
+export const JsonNullValueInput = {
+  JsonNull: JsonNull
+} as const
+
+export type JsonNullValueInput = (typeof JsonNullValueInput)[keyof typeof JsonNullValueInput]
+
+
 export const NullableJsonNullValueInput = {
   DbNull: DbNull,
   JsonNull: JsonNull
 } as const
 
 export type NullableJsonNullValueInput = (typeof NullableJsonNullValueInput)[keyof typeof NullableJsonNullValueInput]
-
-
-export const JsonNullValueInput = {
-  JsonNull: JsonNull
-} as const
-
-export type JsonNullValueInput = (typeof JsonNullValueInput)[keyof typeof JsonNullValueInput]
 
 
 export const QueryMode = {
@@ -1363,6 +1450,20 @@ export type ListDateTimeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaM
 
 
 /**
+ * Reference to a field of type 'Json'
+ */
+export type JsonFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Json'>
+    
+
+
+/**
+ * Reference to a field of type 'QueryMode'
+ */
+export type EnumQueryModeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'QueryMode'>
+    
+
+
+/**
  * Reference to a field of type 'UserRole'
  */
 export type EnumUserRoleFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'UserRole'>
@@ -1401,20 +1502,6 @@ export type FloatFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, '
  * Reference to a field of type 'Float[]'
  */
 export type ListFloatFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Float[]'>
-    
-
-
-/**
- * Reference to a field of type 'Json'
- */
-export type JsonFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Json'>
-    
-
-
-/**
- * Reference to a field of type 'QueryMode'
- */
-export type EnumQueryModeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'QueryMode'>
     
 
 
@@ -1597,6 +1684,7 @@ export interface PrismaClientOptionsWithAdapter extends PrismaClientBaseOptions 
 export type PrismaClientOptions = PrismaClientOptionsWithAccelerateUrl | PrismaClientOptionsWithAdapter
 export type GlobalOmitConfig = {
   clinic?: Prisma.ClinicOmit
+  settingPlan?: Prisma.SettingPlanOmit
   user?: Prisma.UserOmit
   employee?: Prisma.EmployeeOmit
   coworkerPreference?: Prisma.CoworkerPreferenceOmit

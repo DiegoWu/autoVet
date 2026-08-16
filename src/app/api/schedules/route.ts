@@ -3,6 +3,11 @@ import {z} from "zod";
 import {getPrisma} from "@/lib/db";
 import {requireSession} from "@/lib/auth";
 import type {Prisma} from "@/generated/prisma/client";
+import {
+  resolveSundayMode,
+  staffConstraintFields,
+  sundayConfigFields,
+} from "@/lib/schedule-constraints";
 
 const SaveSchema = z.object({
   mode: z.enum(["DOCTOR_ONLY", "DOCTOR_NURSE"]).default("DOCTOR_NURSE"),
@@ -18,11 +23,7 @@ const SaveSchema = z.object({
     yearsExperience: z.number().int().min(0).optional(),
     expertise: z.string().optional(),
     hobbies: z.string().optional(),
-    daysOff: z.array(z.string()).default([]),
-    unavailableWeekdays: z.array(z.number().int().min(0).max(6)).default([]),
-    preferredDaysPerWeek: z.number().int().min(1).max(7).default(5),
-    weekdayConstraintStrength: z.enum(["ABSOLUTE", "PREFERRED"]).default("ABSOLUTE"),
-    daysPerWeekConstraintStrength: z.enum(["ABSOLUTE", "PREFERRED"]).default("PREFERRED"),
+    ...staffConstraintFields,
   })),
   preferences: z.array(z.object({
     fromId: z.string().min(1),
@@ -37,7 +38,7 @@ const SaveSchema = z.object({
     minDoctors: z.number().int().min(1),
     maxDoctors: z.number().int().min(1),
     minNurses: z.number().int().min(0),
-    closedSundays: z.boolean(),
+    ...sundayConfigFields,
     singleDoctorWeekdays: z.array(z.number().int().min(0).max(6)).default([]),
     popularDayRules: z.array(z.object({
       weekday: z.number().int().min(0).max(6),
@@ -95,7 +96,7 @@ const SaveSchema = z.object({
       });
     }
     seenPopularWeekdays.add(rule.weekday);
-    if (input.config.closedSundays && rule.weekday === 0) continue;
+    if (resolveSundayMode(input.config) !== "open" && rule.weekday === 0) continue;
     if (
       rule.minDoctors > input.config.maxDoctors ||
       (
@@ -118,7 +119,7 @@ const SaveSchema = z.object({
     }
   }
   for (const weekday of input.config.singleDoctorWeekdays) {
-    if (input.config.closedSundays && weekday === 0) continue;
+    if (resolveSundayMode(input.config) !== "open" && weekday === 0) continue;
     const doctorMinimum = input.config.popularDayRules.find(
       (rule) => rule.weekday === weekday,
     )?.minDoctors ?? input.config.minDoctors;
@@ -167,7 +168,7 @@ export async function GET(request: Request) {
         grouped.set(key, item);
       }
       const snapshot = run.inputSnapshot as {
-        config?: {closedSundays?: boolean};
+        config?: {closedSundays?: boolean; sundayMode?: "closed" | "nurses_only" | "open"};
       } | null;
       return {
         id: run.id,
@@ -175,7 +176,7 @@ export async function GET(request: Request) {
         status: run.status,
         staff: [...new Set(run.selected?.assignments.map((assignment) => assignment.employee.name) ?? [])],
         savedAt: run.createdAt,
-        closedSundays: snapshot?.config?.closedSundays ?? false,
+        closedSundays: resolveSundayMode(snapshot?.config ?? {}) === "closed",
         selected: {
           score: run.selected?.score ?? 0,
           assignments: [...grouped.values()],
